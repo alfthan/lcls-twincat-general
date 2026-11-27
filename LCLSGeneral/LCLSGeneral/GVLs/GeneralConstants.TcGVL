@@ -9,6 +9,10 @@ VAR_GLOBAL CONSTANT
     // You can make this smaller if you want to use less memory in your program in exchange for limiting your max state count
     // You can make this larger if you want to use states-based FBs sized beyond the EPICS enum limit
     MAX_STATES: UINT := 15;
+    // Number of entries in the timestamp output buffer (arrOutput) of the timestamp buffer FBs.
+    // Declared once here and reused by FB_TimeStampBuffer and FB_TimeStampBufferGlobal so the two
+    // buffer depths cannot diverge and memory use is tuned in a single place.
+    TIMESTAMP_BUFFER_ENTRIES: UINT := 1000;
 END_VAR
 ]]></Declaration>
   </GVL>
