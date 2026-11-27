@@ -206,7 +206,7 @@
     <Compile Include="POUs\Functions\F_ConvertTicksToUnixTimestamp.TcPOU">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="POUs\Functions\TIME_TO_100NS.TcPOU">
+    <Compile Include="POUs\Functions\F_TIME_TO_100NS.TcPOU">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="POUs\Hardware\FB_AnalogOutput.TcPOU">
@@ -270,7 +270,7 @@
     <Compile Include="POUs\Logger\DUTs\E_Subsystem.TcDUT">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="POUs\Logger\SYSTEM_TIME_TO_RFC3339.TcPOU">
+    <Compile Include="POUs\Logger\F_SYSTEM_TIME_TO_RFC3339.TcPOU">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="POUs\RUN_TESTS.TcPOU">
@@ -291,7 +291,7 @@
     <Compile Include="POUs\Tests\FB_Test_EpicsMotorMonitor.TcPOU">
       <SubType>Code</SubType>
     </Compile>
-    <Compile Include="POUs\Tests\ResetCircuitBreakerGlobals.TcPOU">
+    <Compile Include="POUs\Tests\F_ResetCircuitBreakerGlobals.TcPOU">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="Task_3.TcTTO">

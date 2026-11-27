@@ -206,7 +206,7 @@ IF ftTrippedReleased.Q THEN
     WhenTripsCleared := CurrentCallTime;
 END_IF
 rtResetBreaker(CLK:=bResetBreaker OR
-                bEnableAutoReset AND (CurrentCallTime - WhenTripsCleared > TIME_TO_100NS(nTripResetPeriod)) );
+                bEnableAutoReset AND (CurrentCallTime - WhenTripsCleared > F_TIME_TO_100NS(nTripResetPeriod)) );
 
 IF rtResetBreaker.Q THEN
    // bLocalTrickleTripped := FALSE;
@@ -217,7 +217,7 @@ END_IF
 
 bResetBreaker := FALSE;
 
-IF DeltaSinceLastCall < TIME_TO_100NS(nLocalTripThreshold) THEN
+IF DeltaSinceLastCall < F_TIME_TO_100NS(nLocalTripThreshold) THEN
     nTimesViolated := MIN(nTimesViolated + 1, nMinTimeViolationAcceptable+1);
 ELSE
     nTimesViolated := MAX(nTimesViolated - 1, 0);
@@ -225,7 +225,7 @@ END_IF
 
 bLocalTripped := nTimesViolated > nMinTimeViolationAcceptable;
 
-bLocalTrickleTripped := DeltaSinceLastCall < TIME_TO_100NS(nTrickleTripThreshold) AND GVL_LOGGER.bTrickleTripped;
+bLocalTrickleTripped := DeltaSinceLastCall < F_TIME_TO_100NS(nTrickleTripThreshold) AND GVL_LOGGER.bTrickleTripped;
 
 bTripped S= bLocalTrickleTripped OR bLocalTripped;
 rtTripped(CLK:=bTripped);
