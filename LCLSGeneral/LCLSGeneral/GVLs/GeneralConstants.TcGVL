@@ -9,6 +9,13 @@ VAR_GLOBAL CONSTANT
     // You can make this smaller if you want to use less memory in your program in exchange for limiting your max state count
     // You can make this larger if you want to use states-based FBs sized beyond the EPICS enum limit
     MAX_STATES: UINT := 15;
+
+    // Lowest value of the percent scale used for 0-100% commanded hardware.
+    // This is the terminal output that corresponds to 0% of full scale.
+    PERCENT_MIN: LREAL := 0.0;
+    // Highest value of the percent scale used for 0-100% commanded hardware.
+    // This is the terminal output that corresponds to 100% of full scale.
+    PERCENT_MAX: LREAL := 100.0;
 END_VAR
 ]]></Declaration>
   </GVL>

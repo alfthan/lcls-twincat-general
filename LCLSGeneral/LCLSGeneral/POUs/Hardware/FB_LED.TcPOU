@@ -19,6 +19,8 @@
     EL2502 terminal 24 V PWM output voltage control from 0-50% duty cycle.
 
     2022-5-03 Maarten Thomas-Bosum
+    2026-11-27 Audit fix: percent safe range and terminal span now come from
+               GeneralConstants.PERCENT_MIN/PERCENT_MAX instead of literals.
 *)
 VAR_INPUT
     {attribute 'pytmc' := '
@@ -50,19 +52,22 @@ VAR
 END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[// Illuminator conversion to percentage
+// The safe range and the terminal span are both the shared percent scale,
+// so retuning the usable range is a single edit in GeneralConstants.
 fbSetIllPercent(
     fReal:=fIlluminatorPercent,
-    fSafeMax:=100,
-    fSafeMin:=0,
+    fSafeMax:=GeneralConstants.PERCENT_MAX,
+    fSafeMin:=GeneralConstants.PERCENT_MIN,
     iTermBits:=iTermBits,
-    fTermMax:=100,
-    fTermMin:=0,
+    fTermMax:=GeneralConstants.PERCENT_MAX,
+    fTermMin:=GeneralConstants.PERCENT_MIN,
     iRaw=>iIlluminatorINT);
 
-IF  fIlluminatorPercent > 0 THEN
+// Power is on whenever the request is above the bottom of the percent scale
+IF fIlluminatorPercent > GeneralConstants.PERCENT_MIN THEN
     bLedPower := TRUE;
 ELSE
-    bLEDPower := FALSE;
+    bLedPower := FALSE;
 END_IF]]></ST>
     </Implementation>
   </POU>
