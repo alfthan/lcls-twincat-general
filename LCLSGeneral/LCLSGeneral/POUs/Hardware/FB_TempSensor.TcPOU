@@ -8,10 +8,18 @@
     2020-03-02 Zachary Lentz
 *)
 VAR_INPUT
-    // Resolution parameter from the Beckhoff docs. Default is 0.1 for 0.1 degree resolution
+    // Resolution of the terminal, in degrees Celsius per raw count (Beckhoff EP31xx resolution
+    // parameter). Default 0.1, i.e. 0.1 C per count.
+    // Effect: the reading is simply fTemp := iRaw * fResolution, so changing this rescales the
+    // whole temperature output - it is not a filter or a deadband. The status flags (bConnected,
+    // bError, bUnderrange, bOverrange) are unaffected by it.
     fResolution: LREAL := 0.1;
 END_VAR
 VAR_OUTPUT
+    // Measured temperature in degrees Celsius (EGU C, two decimals on the PV).
+    // Scaled from the raw terminal count: fTemp = iRaw * fResolution, i.e. 0.1 C per count at the
+    // default fResolution. It keeps being computed from iRaw even when the sensor is
+    // disconnected, so check bConnected before treating it as a live reading.
     {attribute 'pytmc' := '
         pv: TEMP
         io: input
@@ -20,6 +28,10 @@ VAR_OUTPUT
     '}
     fTemp: LREAL;
 
+    // Sensor connectivity, TRUE = a usable reading is available, FALSE = not usable (PV shows
+    // Connected/Disconnected). Per the terminal manual a sensor counts as disconnected only when
+    // bOverrange AND bError are both TRUE: bConnected := NOT (bOverrange AND bError).
+    // So both bits must be set before the block reports the sensor as disconnected.
     {attribute 'pytmc' := '
         pv: CONN
         io: input
@@ -28,6 +40,10 @@ VAR_OUTPUT
     '}
     bConnected: BOOL;
 
+    // Sensor error, active high (fail-safe): TRUE = the terminal reports a fault, FALSE = healthy.
+    // The input is initialised to TRUE rather than FALSE so that an unpowered terminal, a missing
+    // terminal or a broken wire reads as an error instead of silently as healthy; wire it from
+    // the normally-closed fault contact of the sensor/terminal and do not invert it in the caller.
     {attribute 'pytmc' := '
         pv: ERR
         io: input
@@ -36,10 +52,20 @@ VAR_OUTPUT
     '}
     bError AT %I*: BOOL := TRUE;
 
+    // Underrange status bit of the terminal, active high: TRUE = the measured value is below the
+    // lowest temperature the terminal can represent. Not used by this block's own logic;
+    // bConnected depends only on bOverrange and bError.
     bUnderrange AT %I*: BOOL;
+    // Overrange status bit of the terminal, active high: TRUE = the measured value is above the
+    // highest temperature the terminal can represent - this is also what an open or broken
+    // thermocouple reports. Together with bError it decides bConnected.
     bOverrange AT %I*: BOOL;
 END_VAR
 VAR
+    // Raw integer read straight from the terminal's analog input channel, in terminal counts
+    // (1 LSB = fResolution C, i.e. 0.1 C at the default). Not clamped or validated here: it is
+    // multiplied by fResolution to give fTemp, and its validity is reported by bError,
+    // bUnderrange and bOverrange.
     iRaw AT %I*: INT;
 END_VAR]]></Declaration>
     <Implementation>
