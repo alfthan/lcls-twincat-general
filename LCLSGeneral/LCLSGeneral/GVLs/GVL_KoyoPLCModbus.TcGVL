@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <GVL Name="GVL_KoyoPLCModbus" Id="{3958097d-c066-4f34-82ec-8888d629e53d}">
+    <Declaration><![CDATA[//Constants shared by FB_XKoyoPLCModbus, the Modbus TCP link to a Koyo DL-series PLC.
+{attribute 'qualified only'}
+VAR_GLOBAL CONSTANT
+    // Highest valid index of the coil readback buffer in FB_XKoyoPLCModbus.
+    // Sizes both the internal receive buffer and the published q_anPLCResponse
+    // output array, so the two declarations cannot drift apart.
+    MAX_COIL_BYTE_INDEX : INT := 20; //0..20 => 21 bytes (168 coils) of coil readback
+END_VAR]]></Declaration>
+  </GVL>
+</TcPlcObject>

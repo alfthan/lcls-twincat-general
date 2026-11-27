@@ -2,10 +2,17 @@
 <TcPlcObject Version="1.1.0.1">
   <POU Name="FB_XKoyoPLCModbus" Id="{a477c376-dd06-40c3-b569-438369655d9b}" SpecialFunc="None">
     <Declaration><![CDATA[//Facilitates communication between Beckhoff and Koyo PLC over the network.
+//The link is retargeted through the VAR_INPUT parameters below (IP address, TCP port,
+//coil quantity, Modbus start address, transaction timeout); no device-dependent value
+//is written into the logic, and the coil buffer size comes from
+//GVL_KoyoPLCModbus.MAX_COIL_BYTE_INDEX so the internal and published arrays cannot drift.
+//A. Wallace, 2015-7-22 - initial version
+//2026-11-27 - named Modbus parameters, i_sIPAddr passed through to the read call,
+//             buffer size declared once in GVL_KoyoPLCModbus
 FUNCTION_BLOCK FB_XKoyoPLCModbus
 VAR
     fbKoyo_PLCInputCoilsRx	:	FB_MBReadCoils; //FB for reading the coils from the other PLC
-    anKoyo_PLC_CnBits	:	ARRAY [0..20] OF BYTE; //Buffer for coil readbacks
+    anKoyo_PLC_CnBits	:	ARRAY [0..GVL_KoyoPLCModbus.MAX_COIL_BYTE_INDEX] OF BYTE; //Buffer for coil readbacks
     {attribute 'naming' := 'omit'}
     ftReset	: F_TRIG; //Reset edge sensor
     {attribute 'naming' := 'omit'}
@@ -15,12 +22,16 @@ END_VAR
 
 VAR_INPUT
     i_tRetryTime : TIME := T#10S; //Retry time if modbus transaction fails
-    i_sIPAddr	 : STRING[15]; //IP address of the Koyo PLC
+    i_sIPAddr	 : STRING[15]; //IP address (or host name) of the Koyo PLC
+    i_nTCPPort   : UINT := 502; //Modbus TCP port of the Koyo PLC
+    i_nQuantity  : UINT := 32; //Number of coils read per transaction; must fit the coil buffer
+    i_nMBAddr    : WORD := 8#6000; //Modbus start address of the Koyo control relay bank (octal 6000 = 3072)
+    i_tTimeout   : TIME := T#10S; //Timeout for a single Modbus transaction
 END_VAR
 
 VAR_OUTPUT
     q_xNoPLCResponse : BOOL := TRUE; //Could not reach the PLC if true
-    q_anPLCResponse   : ARRAY [0..20] OF BYTE; //Buffer of coils retrieved from the other PLC
+    q_anPLCResponse   : ARRAY [0..GVL_KoyoPLCModbus.MAX_COIL_BYTE_INDEX] OF BYTE; //Buffer of coils retrieved from the other PLC
     q_xError         : BOOL := FALSE; //Transaction or other error
 END_VAR]]></Declaration>
     <Implementation>
@@ -58,7 +69,7 @@ ftReset();
 
 fbKoyo_PLCInputCoilsRx.bExecute := ftReset.Q OR tonRetry.Q;
 
-fbKoyo_PLCInputCoilsRx(sIPAddr:='i_sIPAddr', nTCPPort:=502, nQuantity:=32, nMBAddr:=8#6000, cbLength:=USINT_TO_UDINT(SIZEOF(anKoyo_PLC_CnBits)),  pDestAddr:=ADR(anKoyo_PLC_CnBits), tTimeout:=T#10S);
+fbKoyo_PLCInputCoilsRx(sIPAddr:=i_sIPAddr, nTCPPort:=i_nTCPPort, nQuantity:=i_nQuantity, nMBAddr:=i_nMBAddr, cbLength:=USINT_TO_UDINT(SIZEOF(anKoyo_PLC_CnBits)), pDestAddr:=ADR(anKoyo_PLC_CnBits), tTimeout:=i_tTimeout);
 
 //run some error code for modbus
 IF fbKoyo_PLCInputCoilsRx.bError THEN
