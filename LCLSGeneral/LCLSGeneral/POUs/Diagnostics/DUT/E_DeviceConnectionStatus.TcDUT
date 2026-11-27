@@ -1,7 +1,58 @@
 <?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1">
   <DUT Name="E_DeviceConnectionStatus" Id="{8a1d6c39-4e72-4b05-8f13-7a9c0e4b1d62}">
-    <Declaration><![CDATA[(* Combined device diagnostic verdict: LinkStatus gates DataStatus. *)
+    <Declaration><![CDATA[(*
+    Purpose:
+        Combined device diagnostic verdict for a single common EtherCAT slave.
+        It reduces the two verdicts FB_DeviceDiagnostics derives from the slave
+        PDO inputs - LinkStatus (E_EcCommState) and DataStatus (E_DataStatus) -
+        into one value a consumer can act on with a single comparison.
+
+    Usage:
+        Declare it as the type of a diagnostic status member, typically the
+        pytmc-exposed ConnectionStatus output/property of an I_DeviceDiagnostics
+        implementation (FB_DeviceDiagnostics is the reference one):
+
+            eConnectionStatus : E_DeviceConnectionStatus;
+            IF eConnectionStatus <> E_DeviceConnectionStatus.Connected THEN
+                // slave unhealthy: NotOperational, WcError or Stale
+            END_IF
+
+        Members:
+            Connected       LinkStatus = OP and DataStatus = Ok
+            NotOperational  LinkStatus <> OP
+            WcError         LinkStatus = OP, DataStatus = WcError
+            Stale           LinkStatus = OP, DataStatus = Stale
+
+        LinkStatus gates DataStatus: while the slave is not in OP the value is
+        NotOperational whatever the data quality, because WcState and
+        InputToggle carry no meaning before the state machine reaches OP.
+        Consumers read this value instead of re-deriving the verdict, so a
+        change of the mapping rules happens in one place.
+
+        The encoding is implicit (Connected = 0 ... Stale = 3, UDINT) and is
+        published to EPICS as io: i, so it is part of the interface: append new
+        members at the end and never renumber or reorder existing ones.
+
+    Objectives:
+        - Give every EtherCAT slave one stable, self-describing verdict instead
+          of each consumer recombining three raw PDO inputs differently.
+        - Keep "not connected" (NotOperational) separate from "connected but
+          unusable data" (WcError, Stale), so the two failure modes can be
+          alarmed on and diagnosed independently.
+        - Preserve a numeric encoding that stays stable for EPICS/archiver
+          consumers and for the diagnostic statuses built on it.
+
+    History:
+        2026-08-20  Mandza <ysmandza@slac.stanford.edu>: created together with
+                    I_DeviceDiagnostics/I_BridgeDiagnostics and their
+                    implementations (commit 94833bd).
+        2026-11-27  taio: header expanded to state purpose, usage, objectives
+                    and history as the POU/DUT header convention requires
+                    (audit finding 1073). No member, value or encoding changed.
+
+    Author/Date: Mandza <ysmandza@slac.stanford.edu>, 2026-08-20.
+*)
 TYPE E_DeviceConnectionStatus :
 (
     Connected,       // LinkStatus = OP and DataStatus = Ok
