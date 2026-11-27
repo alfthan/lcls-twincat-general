@@ -67,9 +67,11 @@ VAR_INST
     fbLogNoisy : FB_LogMessage;
     tNoisy : TON := (PT:=T#50ms); //50ms is > the local trip threshold default of 1ms
     fbLogNice : FB_LogMessage := (nTrickleTripThreshold:=T#2s);
-    tNice : TON := (PT:=T#5s);
-    tTrickle : TON := (PT:= GVL_Logger.nTrickleTripTime + T#1s);
+    tNice : TON := (PT:=T#5s); //5s is > fbLogNice.nTrickleTripThreshold of 2s
+    tTrickle : TON := (PT:= GVL_Logger.nTrickleTripTime + T#10s); //Watchdog: global trip + the next 5s fbLogNice tick
     fbLogHandler : FB_LogHandler;
+    bNiceSeeded : BOOL; //TRUE once fbLogNice has been called, so its next call has a real call interval
+    bNiceSampledWhileTripped : BOOL; //TRUE once fbLogNice was evaluated while the global trickle trip was active
 END_VAR]]></Declaration>
       <Implementation>
         <ST><![CDATA[TEST('ManySmall');
@@ -78,23 +80,45 @@ END_VAR]]></Declaration>
 // local logging rate limit until the global trickle trip
 // was triggered. Then verify only those loggers that
 // were just a little too noisy, would trip off, while others stayed up.
+// The quiet logger has to be evaluated at least once *while* the global
+// trickle trip is active, otherwise the assertion below passes vacuously
+// and fbLogNice.nTrickleTripThreshold is never exercised.
 
 fbLogHandler.CircuitBreaker();
 
-// Call this guy every 50ms or so.
+// Call this guy every 50ms or so. That is faster than the default trickle trip
+// threshold (100ms), so it must trip once the global trickle trip is active.
 tNoisy(IN := NOT tNoisy.Q);
 IF tNoisy.Q THEN
     fbLogNoisy.CircuitBreaker();
 END_IF
 
-// Call this guy every 5s or so
-tNice(IN := NOT tNoisy.Q);
+// Call this guy every 5s or so. That is slower than its own nTrickleTripThreshold
+// (2s), so it must keep logging while the global trickle trip is active.
+// tNice has to feed back its own output here: driving it from tNoisy.Q would
+// restart it every 50ms, so it would never elapse and fbLogNice would never be
+// called at all.
+tNice(IN := NOT tNice.Q);
 IF tNice.Q THEN
     fbLogNice.CircuitBreaker();
+    IF bNiceSeeded THEN
+        // This call had a real call interval behind it, so record whether it was
+        // evaluated while the global trickle trip was active. The first call has
+        // no previous call time and cannot trickle trip, so it must not count as
+        // coverage of the trickle trip threshold.
+        bNiceSampledWhileTripped S= GVL_Logger.bTrickleTripped;
+    ELSE
+        bNiceSeeded := TRUE;
+    END_IF
 END_IF
 
+// The global trickle trip registers after nTrickleTripTime (10s) and fbLogNice is
+// only sampled on its next 5s tick. tTrickle is a watchdog and gives the trip plus
+// that tick room to happen before the assertions are evaluated.
 tTrickle(IN:=TRUE);
-IF tTrickle.Q THEN
+IF (bNiceSampledWhileTripped AND fbLogNoisy.bLocalTrickleTripped) OR tTrickle.Q THEN
+    AssertTrue(bNiceSampledWhileTripped,
+        'fbLogNice should have been evaluated while the global trickle trip was active.');
     AssertTrue(fbLogNoisy.bLocalTrickleTripped AND NOT fbLogNice.bLocalTrickleTripped,
             'Only Noisy should be tripped.');
     TEST_FINISHED_NAMED('ManySmall');
