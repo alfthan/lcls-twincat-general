@@ -1,0 +1,43 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <GVL Name="GVL_ErrorIds" Id="{1729f270-08dc-4ef4-8d54-34e6df52f3b0}">
+    <Declaration><![CDATA[{attribute 'qualified only'}
+(*
+    GVL_ErrorIds
+    Named error identifiers that the hardware blocks latch when an asynchronous
+    command, wait, poll or adapter query exceeds its watchdog.
+
+    Usage:
+        nErrorId := GVL_ErrorIds.nEl6SendTimeout;
+
+    The watchdog identifiers are deliberately outside the ADS error ranges
+    (16#0000-16#00FF client errors, 16#0700-16#1849 device errors), so a latched
+    timeout can never be mistaken for an ADS return code reported by a fieldbus
+    or adapter call.
+
+    History:
+    2026-11-27  Added per-operation watchdog identifiers for the EtherCAT state
+                request, EL6 serial transaction, EtherCAT diagnostics and
+                adapter query blocks.
+*)
+VAR_GLOBAL CONSTANT
+    // FB_ECATepics: requested EtherCAT slave state change did not complete
+    nEcatStateRequestTimeout : UDINT := 16#0000_E001;
+    // FB_EL6_Com: the EL6 serial line never completed the send phase
+    nEl6SendTimeout : UDINT := 16#0000_E002;
+    // FB_EL6_Com: the serial device never replied within the receive timeout
+    nEl6ReceiveTimeout : UDINT := 16#0000_E003;
+    // FB_EcatDiag: reading the state of all EtherCAT slaves timed out
+    nEcatDiagAllSlaveStatesTimeout : UDINT := 16#0000_E004;
+    // FB_EcatDiag: reading the EtherCAT master state timed out
+    nEcatDiagMasterStateTimeout : UDINT := 16#0000_E005;
+    // FB_EcatDiag: reading the configured slave list timed out
+    nEcatDiagConfSlavesTimeout : UDINT := 16#0000_E006;
+    // FB_GetPLCIPAddress: the adapter information query did not answer
+    nGetAdapterIpTimeout : UDINT := 16#0000_E007;
+    // FB_GetPLCIPAddress: the adapter information query reported a failure
+    nGetAdapterIpQueryFailed : UDINT := 16#0000_E008;
+END_VAR
+]]></Declaration>
+  </GVL>
+</TcPlcObject>

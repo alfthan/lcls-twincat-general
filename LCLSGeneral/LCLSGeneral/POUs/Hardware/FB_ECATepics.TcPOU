@@ -1,13 +1,55 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1">
   <POU Name="FB_ECATepics" Id="{38ed9c12-1d10-4e74-8cdb-42be0630d47c}" SpecialFunc="None">
-    <Declaration><![CDATA[FUNCTION_BLOCK FB_ECATepics
+    <Declaration><![CDATA[(*
+    FB_ECATepics
+    Reads the EtherCAT state of one slave and requests a new state for it. The
+    device state, the requested state and the diagnostics are exposed to EPICS
+    through pytmc PVs.
+
+    Usage:
+        Call once per cycle. Write the requested state to eReqState and pulse
+        bCmdReqState to command the transition. Poll bTimeout/nErrorId for the
+        outcome and pulse bResetError to clear a latched timeout fault.
+
+    Objectives:
+    - Poll the device state on a fixed interval and decode the ADS error code of
+      the state request into sErrorMessage.
+    - Bound the state change with an active per-request watchdog
+      (tStateCmdTimeout) that runs while the request is pending. On expiry the
+      request is cleared, the block returns to idle and an explicit timeout
+      fault (bTimeout) with an error id and message is latched, so a hung
+      transfer is distinguishable from a slow one.
+
+    History:
+    2026-11-27  Add per-request watchdog, latched timeout fault and error id.
+*)
+FUNCTION_BLOCK FB_ECATepics
 VAR_INPUT
     sNetId          : T_AmsNetId;
     nSlaveAddr      : UINT;
     sDeviceDesc		: T_MaxString := 'TERM #';
+    // Watchdog for one requested EtherCAT state change. Expiry aborts the
+    // request and latches an explicit timeout fault.
+    tStateCmdTimeout : TIME := T#5S;
+    // Rising edge clears the latched timeout fault (bTimeout/nErrorId/message)
+    bResetError     : BOOL;
 END_VAR
 VAR_OUTPUT
+    // Latched: the requested state change did not complete within tStateCmdTimeout
+    {attribute 'pytmc' := '
+        pv: bTimeout
+        io: i
+    '}
+    bTimeout        : BOOL;
+    // Latched error id: 0 = no error,
+    // GVL_ErrorIds.nEcatStateRequestTimeout = watchdog expiry, otherwise the ADS
+    // error code of the last failed state request.
+    {attribute 'pytmc' := '
+        pv: nErrorId
+        io: i
+    '}
+    nErrorId        : UDINT;
 END_VAR
 VAR
 
@@ -58,6 +100,11 @@ VAR
     fbgetStatusTimer : TON;
     bInit : BOOL := TRUE;
 
+    // Watchdog active while a state-change request is pending
+    fbSetStateTimeout : TON;
+    // Reset trigger for the latched timeout fault
+    rtResetError : R_TRIG;
+
 END_VAR
 ]]></Declaration>
     <Implementation>
@@ -70,10 +117,24 @@ IF bInit THEN
     ePrevReqState :=  eReqState;
 END_IF
 
+// --- Per-request watchdog --------------------------------------------------
+// The timer runs from the moment the request is issued until the ADS call
+// reports completion, so a stuck busy signal or a lost device reply cannot keep
+// the request pending forever.
+fbSetStateTimeout(IN := bCmdReqState, PT := tStateCmdTimeout);
+
+IF fbSetStateTimeout.Q THEN
+    // Watchdog expired: abort the request, return the block to idle and latch an
+    // explicit timeout fault.
+    bCmdReqState := FALSE;
+    bTimeout := TRUE;
+END_IF
+
 fbsetSlaveState(sNetId:=sNetId,
     nSlaveAddr:= nSlaveAddr,
     bExecute:= bCmdReqState,
-    reqState:= eReqState);
+    reqState:= eReqState,
+    tTimeout:= tStateCmdTimeout);
 
 fbgetSlaveState(sNetId:=sNetId,
     nSlaveAddr:= nSlaveAddr,
@@ -95,6 +156,16 @@ CASE fbgetSlaveState.state.deviceState OF
 END_CASE
 
 bDevError := fbsetSlaveState.bError;
+
+// Re-derive nErrorId every scan: a live ADS error is reported with its own code,
+// a latched timeout keeps its identifier until it is acknowledged.
+IF bDevError THEN
+    nErrorId := fbsetSlaveState.nErrId;
+ELSIF bTimeout THEN
+    nErrorId := GVL_ErrorIds.nEcatStateRequestTimeout;
+ELSE
+    nErrorId := 0;
+END_IF
 
 IF bCmdReqState AND (bDevError OR (NOT fbsetSlaveState.bBusy)) THEN
     bCmdReqState := FALSE;
@@ -165,6 +236,20 @@ CASE fbsetSlaveState.nErrId OF
     ELSE
     sErrorMessage := 'Unknown ADS error code.';
 END_CASE
+
+// The timeout text takes precedence over the ADS decode so the latched fault
+// stays explicit while the request is not answering.
+IF bTimeout THEN
+    sErrorMessage := 'Timeout: EtherCAT state request did not complete.';
+END_IF
+
+// Acknowledge of the latched timeout fault
+rtResetError(CLK := bResetError);
+IF rtResetError.Q THEN
+    bTimeout := FALSE;
+    nErrorId := 0;
+    sErrorMessage := '';
+END_IF
 
 IF fbgetStatusTimer.Q THEN
      fbgetStatusTimer.IN := FALSE; // reset timer

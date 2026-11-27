@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <!-- <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>-->
@@ -95,6 +95,9 @@
       <LinkAlways>true</LinkAlways>
     </Compile>
     <Compile Include="GVLs\Global_Variables_EtherCAT.TcGVL">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="GVLs\GVL_ErrorIds.TcGVL">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="GVLs\GeneralConstants.TcGVL">
