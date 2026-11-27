@@ -1,0 +1,75 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <DUT Name="ST_ECATepics_IO" Id="{070a4a93-09e4-4721-8e8e-6517b58575d6}">
+    <Declaration><![CDATA[TYPE ST_ECATepics_IO :
+(*
+    Command and status interface for one EtherCAT slave supervised by FB_ECATepics.
+
+    FB_ECATepics takes an instance of this struct as its single VAR_IN_OUT terminal,
+    so all of the command and status data that crosses into EPICS lives in one place
+    instead of being spread over individual scalar terminals. The ADS addressing of
+    the slave (AMS Net ID and slave address) stays on the function block, because it
+    is static configuration rather than command/status data.
+
+    Usage:
+        stEcatIO : ST_ECATepics_IO;
+        fbEcat : FB_ECATepics;
+        fbEcat(stEcatIO := stEcatIO, sNetId := '1.2.3.4.5.1', nSlaveAddr := 1001);
+        stEcatIO.eReqState := E_ECAT_STATES.OP;
+        stEcatIO.bCmdReqState := TRUE;  // cleared by FB_ECATepics when the request ends
+
+    History:
+        2026-11-27 Added as the single VAR_IN_OUT interface for FB_ECATepics
+*)
+STRUCT
+    (* Commands *)
+    {attribute 'pytmc' := '
+        pv: bCmdReqState
+    '}
+    // Set TRUE to request the state transition to eReqState; FB_ECATepics clears it when the request ends
+    bCmdReqState : BOOL;
+
+    {attribute 'pytmc' := '
+        pv: eReqState
+    '}
+    // Requested EtherCAT slave state, applied while bCmdReqState is TRUE
+    eReqState : E_ECAT_STATES;
+
+    (* Status *)
+    {attribute 'pytmc' := '
+        pv: eDevState
+        io: o
+        field: ZRSV MAJOR
+        field: ONSV MAJOR
+        field: TWSV MAJOR
+        field: THSV MAJOR
+        field: FRSV NO_ALARM
+        field: FVSV MAJOR
+    '}
+    // EtherCAT slave state read back from the master: INIT, PREOP, BOOTSTRAP, SAFEOP, OP or ERROR
+    eDevState : E_ECAT_STATES;
+
+    {attribute 'pytmc' := '
+        pv: bError
+        io: o
+    '}
+    // TRUE while the last slave state request reported an ADS error
+    bDevError : BOOL;
+
+    {attribute 'pytmc' := '
+        pv: sErrorMessage
+        io: o
+    '}
+    // Human readable text of the last ADS error reported by the state request
+    sErrorMessage : STRING;
+
+    {attribute 'pytmc' := '
+        pv: sDESC
+        io: io
+    '}
+    // Device description for this slave, seeded on the first scan from FB_ECATepics.sDeviceDesc
+    sDevDesc : STRING;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

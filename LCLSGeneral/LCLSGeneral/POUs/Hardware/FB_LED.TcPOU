@@ -18,51 +18,42 @@
     illuminators on TMO endstations, which are rated for 12 V max. They will be dimmed via the
     EL2502 terminal 24 V PWM output voltage control from 0-50% duty cycle.
 
+    The block declares no terminals of its own: all of its command, configuration and status
+    data lives in the single VAR_IN_OUT interface struct ST_LED_Interface, which also carries
+    the raw terminal output link (iIlluminatorRaw).
+
+    Usage:
+        stLed : ST_LED_Interface;
+        fbLed : FB_LED;
+        fbLed(stLed := stLed);
+
     2022-5-03 Maarten Thomas-Bosum
+    2026-11-27 Replaced the individual command/status terminals with the ST_LED_Interface VAR_IN_OUT
 *)
-VAR_INPUT
-    {attribute 'pytmc' := '
-        pv: NAME
-        io: io
-        field: DESC Descriptive name for the LED
-        autosave_pass0: VAL DESC
-    '}
-    ledName : STRING;
-
-    iTermBits : UINT;
-
-    {attribute 'pytmc' := '
-        pv: ILL:PCT
-        field: EGU %
-    '}
-    fIlluminatorPercent: LREAL;
-
-    {attribute 'pytmc' := '
-        pv: PWR
-        field: ZNAM OFF
-        field: ONAM ON
-    '}
-    bLedPower AT %Q*: BOOL;
+VAR_IN_OUT
+    // Command, configuration and status interface of this LED illuminator, including the raw terminal output
+    stLed : ST_LED_Interface;
 END_VAR
 VAR
-    iIlluminatorINT AT %Q*: INT;
-    fbSetIllPercent: FB_AnalogOutput;
+    // Percentage to raw terminal value conversion
+    fbSetIllPercent : FB_AnalogOutput;
 END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[// Illuminator conversion to percentage
 fbSetIllPercent(
-    fReal:=fIlluminatorPercent,
-    fSafeMax:=100,
-    fSafeMin:=0,
-    iTermBits:=iTermBits,
-    fTermMax:=100,
-    fTermMin:=0,
-    iRaw=>iIlluminatorINT);
+    fReal := stLed.fIlluminatorPercent,
+    fSafeMax := 100,
+    fSafeMin := 0,
+    iTermBits := stLed.iTermBits,
+    fTermMax := 100,
+    fTermMin := 0,
+    iRaw => stLed.iIlluminatorRaw);
 
-IF  fIlluminatorPercent > 0 THEN
-    bLedPower := TRUE;
+// Report the LED as on whenever illumination is requested
+IF stLed.fIlluminatorPercent > 0 THEN
+    stLed.bLedPower := TRUE;
 ELSE
-    bLEDPower := FALSE;
+    stLed.bLedPower := FALSE;
 END_IF]]></ST>
     </Implementation>
   </POU>

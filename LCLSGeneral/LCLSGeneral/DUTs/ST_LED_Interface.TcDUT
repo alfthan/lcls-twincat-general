@@ -1,0 +1,64 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <DUT Name="ST_LED_Interface" Id="{91b7ba75-4f63-4a96-ba90-0d77f0f70db5}">
+    <Declaration><![CDATA[TYPE ST_LED_Interface :
+(*
+    Command, configuration and status interface for one dimmable LED illuminator
+    driven by FB_LED.
+
+    FB_LED takes an instance of this struct as its single VAR_IN_OUT terminal, so
+    everything a caller commands or observes about the LED lives in one place
+    instead of being spread over individual VAR_INPUT/AT %Q* terminals.
+
+    The raw analog output iIlluminatorRaw is a member here as well, so the block's
+    physical terminal link travels with the rest of the device interface. Declare
+    the struct instance in the I/O configuration (or a GVL) and link
+    iIlluminatorRaw to the analog output terminal of the illuminator.
+
+    Usage:
+        stLed : ST_LED_Interface;
+        fbLed : FB_LED;
+        fbLed(stLed := stLed);
+        stLed.fIlluminatorPercent := 50.0;  // 50 % illumination
+
+    History:
+        2026-11-27 Added as the single VAR_IN_OUT interface for FB_LED
+*)
+STRUCT
+    (* Identification *)
+    {attribute 'pytmc' := '
+        pv: NAME
+        io: io
+        field: DESC Descriptive name for the LED
+        autosave_pass0: VAL DESC
+    '}
+    // Descriptive name of this LED, saved persistently and exposed to EPICS as NAME
+    sLedName : STRING;
+
+    (* Configuration *)
+    // Number of analog output terminal bits; the full scale raw value is (2^iTermBits - 1)
+    iTermBits : UINT;
+
+    (* Commands *)
+    {attribute 'pytmc' := '
+        pv: ILL:PCT
+        field: EGU %
+    '}
+    // Requested illumination in percent of full scale; clamped to 0..100 before conversion
+    fIlluminatorPercent : LREAL;
+
+    (* Status *)
+    {attribute 'pytmc' := '
+        pv: PWR
+        field: ZNAM OFF
+        field: ONAM ON
+    '}
+    // TRUE while illumination is requested (fIlluminatorPercent > 0), i.e. the LED is on
+    bLedPower AT %Q* : BOOL;
+
+    // Raw value written to the analog output terminal, scaled from fIlluminatorPercent
+    iIlluminatorRaw AT %Q* : INT;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>
