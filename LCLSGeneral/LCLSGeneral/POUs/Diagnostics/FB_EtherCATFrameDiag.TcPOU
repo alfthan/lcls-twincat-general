@@ -1,13 +1,79 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1">
   <POU Name="FB_EtherCATFrameDiag" Id="{c00b03c3-5a7a-47db-a857-8e703b702b2a}" SpecialFunc="None">
-    <Declaration><![CDATA[FUNCTION_BLOCK FB_EtherCATFrameDiag
+    <Declaration><![CDATA[(*
+    FB_EtherCATFrameDiag - working-counter (frame) health check for one EtherCAT frame.
+
+    PURPOSE
+        Condenses the EtherCAT master's per-frame WcState word into a single BOOL
+        stating whether the datagrams the calling task depends on were processed
+        by every expected slave. The caller links wFrmXWcState to the master's
+        Inputs^FrmXWcState word (Frm1WcState for the first frame) and reads
+        bFrameWcStateOK, which is TRUE only while none of the bits selected by
+        wReqZeroMask is set.
+
+    USAGE
+        Called once per cycle from FB_EcatDiagWrapper, which forwards its own
+        wFrmXWcState / wReqZeroMask and publishes the result as
+        bFrameWcStateOK -> bAllFrameWcStatesOK. FB_EtherCATDiag consumes that flag
+        as "all frames OK" and logs a Critical "Working Counter Frame Error"
+        message when it drops, so this block is the cheapest early indication of
+        a frame fault before the deep slave diagnostic is started.
+        The block is stateless and combinational: the output follows the inputs in
+        the same cycle, so it may be called from any task and as often as needed.
+        The mask is per frame - keep the default 16#FFFF when every reported bit
+        is a fault, or clear the bits that are unused or known benign on that
+        master/frame.
+
+    OBJECTIVES
+        - Report a broken frame as one BOOL, so diagnostic code, the logger and
+          EPICS do not each have to mask and compare the raw WcState word.
+        - Keep the decision to ignore individual WcState bits in one explicit
+          mask instead of scattering 16#.... literals through the call sites.
+        - Stay side-effect free (no state, no timers, no logging) so the same
+          block suits every frame and every task without configuration.
+
+    HISTORY
+        2020-03-15 / Alex Wallace
+            Function block added ("Adding the frame diag because apparently it
+            matters.") together with FB_EcatDiagWrapper.
+        2026-11-27 / Scirix Agent
+            Added this header comment and documented the declaration; comment
+            only, no behaviour change (audit finding #96, convention
+            conv_321640e095c0).
+
+    NOTE
+        The meaning of the individual WcState bits is defined by the EtherCAT
+        master, not by this block: it only tests the masked bits against zero and
+        never decodes them, so a set bit is reported as a frame fault without
+        naming the slave whose working counter was missed.
+*)
+FUNCTION_BLOCK FB_EtherCATFrameDiag
 VAR_INPUT
-    wFrmXWcState 		: WORD;				// FrmXWcState
-    wReqZeroMask 		: WORD := 16#FFFF;	// mask, bit TRUE: require wFrmXWcState.bit = FALSE, bit FALSE: ignore wFrmXWcState.bit *)
+    (*
+        WcState word of the watched frame, taken from the EtherCAT master's
+        Inputs^FrmXWcState (FrmXWcState for frame X). A set bit means the datagram
+        of this frame was not processed as expected on the fieldbus; which bit
+        means what is the master's definition, not this block's. No units - this
+        is a status bitfield, not a counter.
+    *)
+    wFrmXWcState 		: WORD;				// frame WcState bitfield from the master, no units
+    (*
+        Mask of the wFrmXWcState bits that are checked:
+        bit TRUE  = the bit must be FALSE for the frame to be reported OK,
+        bit FALSE = the bit is ignored.
+        Default 16#FFFF checks every bit; clear a bit only when that condition is
+        unused or known benign on this frame.
+    *)
+    wReqZeroMask 		: WORD := 16#FFFF;	// checked-bit mask, default 16#FFFF (check every bit)
 END_VAR
 VAR_OUTPUT
-    bFrameWcStateOK		: BOOL;				// result of fram state check
+    (*
+        TRUE while every checked bit of wFrmXWcState is FALSE, i.e. the frame is
+        healthy; FALSE as soon as one checked bit is set. Combinational, so it is
+        valid in the same cycle the inputs are written.
+    *)
+    bFrameWcStateOK		: BOOL;				// all checked frame bits FALSE (frame OK)
 END_VAR
 VAR
 END_VAR]]></Declaration>
