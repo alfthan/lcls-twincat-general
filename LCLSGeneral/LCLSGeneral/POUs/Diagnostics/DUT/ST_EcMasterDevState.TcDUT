@@ -3,17 +3,21 @@
   <DUT Name="ST_EcMasterDevState" Id="{d5474f70-6d59-4084-94cf-4911c3abc999}">
     <Declaration><![CDATA[TYPE ST_EcMasterDevState :
 STRUCT
-    eEcState	 		: E_EcCommState;
-    nReserved			: ARRAY [0..2] OF UINT;
+    (* EtherCAT master device state, decoded from the raw DevState word of the master
+       (FB_EtherCATDiag.M_CheckMasterDevState). The BOOLs are a live decode of the last
+       observed DevState: they are refreshed whenever DevState changes and are not latched
+       or acknowledged by this structure. *)
+    eEcState	 		: E_EcCommState; 		// EtherCAT state machine state of the master device (INIT/PREOP/BOOT/SAFEOP/OP); no units
+    nReserved			: ARRAY [0..2] OF UINT;	// reserved / unused placeholder, not evaluated by the diagnostic FBs; no units
 
-    bLinkError			: BOOL;
-    bResetRequired		: BOOL;
-    bMissFrmRedMode		: BOOL;
-    bWatchdogTriggerd	: BOOL;
-    bDriverNotFound		: BOOL;
-    bResetActive		: BOOL;
-    bAtLeastOneNotInOp	: BOOL;
-    bDcNotInSync		: BOOL;
+    bLinkError			: BOOL;					// TRUE: master reports a link error (DevState low nibble = 1 or 4)
+    bResetRequired		: BOOL;					// TRUE: master requires a reset (DevState low nibble = 2, or DevState = 16#10)
+    bMissFrmRedMode		: BOOL;					// TRUE: frame missing in redundant (cable redundancy) mode (DevState low nibble = 8)
+    bWatchdogTriggerd	: BOOL;					// TRUE: master watchdog has triggered (DevState bit 16#20)
+    bDriverNotFound		: BOOL;					// TRUE: EtherCAT driver not found by the master (DevState bit 16#40)
+    bResetActive		: BOOL;					// TRUE: a master reset is currently in progress (DevState bit 16#80)
+    bAtLeastOneNotInOp	: BOOL;					// TRUE: at least one slave is not in OP state (DevState bits 16#100/16#200/16#400/16#800)
+    bDcNotInSync		: BOOL;					// TRUE: distributed clocks (DC) not in sync (DevState bit 16#1000)
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>
