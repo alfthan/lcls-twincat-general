@@ -1,8 +1,53 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1">
   <POU Name="F_ConvertTicksToUnixTimestamp" Id="{33156588-fcdd-4f41-9fa6-98babd8a3abc}" SpecialFunc="None">
-    <Declaration><![CDATA[FUNCTION F_ConvertTicksToUnixTimestamp : LREAL
+    <Declaration><![CDATA[(*
+    F_ConvertTicksToUnixTimestamp - convert Windows FILETIME ticks to Unix time.
+
+    PURPOSE
+        Converts the timestamp of a Tc3 event, as delivered by the
+        Tc3_EventLogger function blocks (fbEvent.nTimestamp), into the Unix
+        timestamp the logging consumers of this library work with, so events
+        raised in the PLC can be ordered and correlated with the rest of the
+        control system.
+
+    USAGE
+        Called by FB_Listener while it copies a received Tc3 event into a
+        pending log record:
+            stEventInfo.ts := F_ConvertTicksToUnixTimestamp(fbEvent.nTimestamp);
+        The function is pure - no internal state and no side effects - so it may
+        be called from any task context. The argument must be a FILETIME tick
+        count as described on nTimestamp below: a TwinCAT TIME value is not
+        accepted, and no time-zone shift is applied (the result is UTC).
+
+    OBJECTIVES
+        - Keep the 1601-to-1970 epoch shift and the 100 ns tick resolution in
+          one named conversion instead of repeating the magic numbers at every
+          call site.
+        - Return LREAL so the fractional second survives; rounding to an
+          integer would lose the sub-second ordering of events logged within
+          the same second.
+        - State the tick base and units in the interface, so a caller cannot
+          silently pass a TIME or an already-Unix value.
+
+    HISTORY
+        2019-11-12 / K Lauer
+            Function added with the Tc3_EventLogger logging rewrite.
+        2026-11-27 / Scirix Agent
+            Added this header comment and the nTimestamp declaration comment;
+            documentation only, no behaviour change (audit finding #89,
+            convention conv_321640e095c0).
+
+    NOTE
+        The constant declarations below are the authority for the tick rate and
+        the epoch offset used by the conversion.
+*)
+FUNCTION F_ConvertTicksToUnixTimestamp : LREAL
 VAR_INPUT
+    // Windows FILETIME ticks (100 ns units) counted from 1601-01-01 UTC,
+    // i.e. the tick base of Tc3_EventLogger (fbEvent.nTimestamp).
+    // Divide by 10 000 000 for seconds, then subtract 11 644 473 600 s
+    // to move the epoch to 1970-01-01 UTC. Not a TwinCAT TIME value.
     nTimestamp : ULINT;
 END_VAR
 VAR CONSTANT
