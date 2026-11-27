@@ -19,66 +19,226 @@ VAR_INPUT
 END_VAR
 VAR_INST
     fbMonitor : FB_EpicsMotorMonitor;
+
+    // Multi-cycle test bookkeeping
+    nCycle      : INT;
+    nTestCycles : INT := 3;
+    bAllValid   : BOOL;
+    bAllInvalid : BOOL;
+    bAllMoving  : BOOL;
+    bAllStopped : BOOL;
 END_VAR]]></Declaration>
       <Implementation>
-        <ST><![CDATA[TEST('Basic');
+        <ST><![CDATA[(*
+    Unit tests for FB_EpicsMotorMonitor.
 
-WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=0, nStatus:=0, nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
-fbMonitor();
-AssertTrue(fbMonitor.bValid, Message:='Data valid');
+    The block under test sanitizes three EPICS links (RBV, DMOV and MSTA)
+    through FB_LREALFromEPICS, so its behaviour is stateful: bValid follows the
+    last severity received, the values are held between EPICS writes, and an
+    invalid state must be retained on the cycles where EPICS does not rewrite
+    its data.
+
+    Each test therefore runs the block under test for several cycles
+    (nTestCycles) before asserting, and the transition tests assert both the
+    cycle on which a change arrives and the following cycles, on which the
+    change is not rewritten.
+
+    History:
+        2026-11-27 - run multiple cycles and cover validity/state transitions.
+*)
+
+TEST('Basic');
+
+// EPICS refreshes all links every cycle: the monitor must report valid on each
+// of them, not only on the first cycle after a write.
+bAllValid := TRUE;
+FOR nCycle := 1 TO nTestCycles DO
+    WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=0, nStatus:=0,
+        nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
+    fbMonitor();
+    bAllValid := bAllValid AND fbMonitor.bValid;
+END_FOR
+AssertTrue(bAllValid, Message:='Data valid on every cycle');
 
 TEST_FINISHED();
 
 
-TEST('Severities');
+TEST('Validity transitions');
 
-WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=0, nStatus:=0, nRBV_Severity:=2, nStatus_Severity:=0, nMoving_Severity:=0);
-fbMonitor();
-AssertFalse(fbMonitor.bValid, Message:='Invalid RBV');
+// Known-good starting point.
+bAllValid := TRUE;
+FOR nCycle := 1 TO nTestCycles DO
+    WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=0, nStatus:=0,
+        nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
+    fbMonitor();
+    bAllValid := bAllValid AND fbMonitor.bValid;
+END_FOR
+AssertTrue(bAllValid, Message:='Data valid before the transitions');
 
-WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=0, nStatus:=0, nRBV_Severity:=0, nStatus_Severity:=2, nMoving_Severity:=0);
+// RBV severity becomes major: it is consumed on this cycle ...
+WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=0, nStatus:=0,
+    nRBV_Severity:=2, nStatus_Severity:=0, nMoving_Severity:=0);
 fbMonitor();
-AssertFalse(fbMonitor.bValid, Message:='Invalid status');
+AssertFalse(fbMonitor.bValid, Message:='Invalid RBV on the transition cycle');
 
-WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=0, nStatus:=0, nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=2);
-fbMonitor();
-AssertFalse(fbMonitor.bValid, Message:='Invalid moving');
+// ... and the block must stay invalid on the later cycles, where EPICS does
+// not rewrite the severity: the last severity received is retained.
+bAllInvalid := TRUE;
+FOR nCycle := 1 TO nTestCycles DO
+    fbMonitor();
+    bAllInvalid := bAllInvalid AND NOT fbMonitor.bValid;
+END_FOR
+AssertTrue(bAllInvalid, Message:='Invalid RBV retained over multiple cycles');
 
-WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=0, nStatus:=0, nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
+// Recovery: normal severity is reported again and validity returns.
+WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=0, nStatus:=0,
+    nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
 fbMonitor();
-AssertTrue(fbMonitor.bValid, Message:='All valid');
+AssertTrue(fbMonitor.bValid, Message:='Valid again after the RBV severity clears');
+
+// The MSTA link severity behaves identically.
+WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=0, nStatus:=0,
+    nRBV_Severity:=0, nStatus_Severity:=2, nMoving_Severity:=0);
+fbMonitor();
+AssertFalse(fbMonitor.bValid, Message:='Invalid MSTA on the transition cycle');
+
+bAllInvalid := TRUE;
+FOR nCycle := 1 TO nTestCycles DO
+    fbMonitor();
+    bAllInvalid := bAllInvalid AND NOT fbMonitor.bValid;
+END_FOR
+AssertTrue(bAllInvalid, Message:='Invalid MSTA retained over multiple cycles');
+
+WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=0, nStatus:=0,
+    nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
+fbMonitor();
+AssertTrue(fbMonitor.bValid, Message:='Valid again after the MSTA severity clears');
+
+// The DMOV link severity behaves identically.
+WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=0, nStatus:=0,
+    nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=2);
+fbMonitor();
+AssertFalse(fbMonitor.bValid, Message:='Invalid DMOV on the transition cycle');
+
+bAllInvalid := TRUE;
+FOR nCycle := 1 TO nTestCycles DO
+    fbMonitor();
+    bAllInvalid := bAllInvalid AND NOT fbMonitor.bValid;
+END_FOR
+AssertTrue(bAllInvalid, Message:='Invalid DMOV retained over multiple cycles');
+
+WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=0, nStatus:=0,
+    nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
+fbMonitor();
+AssertTrue(fbMonitor.bValid, Message:='All links valid again');
 
 TEST_FINISHED();
+
+
+TEST('Enable transitions');
+
+WriteData(fbMonitor:=fbMonitor, fRBV:=42.0, nMoving:=1, nStatus:=0,
+    nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
+fbMonitor(bEnable:=TRUE);
+fbMonitor();
+AssertTrue(fbMonitor.bValid, Message:='Valid before disabling');
+AssertEquals_LREAL(Actual:=fbMonitor.fPosition, Expected:=42.0, Delta:=0.1,
+    Message:='Position before disabling');
+
+// While disabled the block invalidates on every cycle ...
+bAllInvalid := TRUE;
+FOR nCycle := 1 TO nTestCycles DO
+    fbMonitor(bEnable:=FALSE);
+    bAllInvalid := bAllInvalid AND NOT fbMonitor.bValid;
+END_FOR
+AssertTrue(bAllInvalid, Message:='Invalid on every disabled cycle');
+
+// ... while still reporting the last trusted position.
+AssertEquals_LREAL(Actual:=fbMonitor.fPosition, Expected:=42.0, Delta:=0.1,
+    Message:='Position held while disabled');
+
+// Re-enabling with live data restores validity.
+WriteData(fbMonitor:=fbMonitor, fRBV:=42.0, nMoving:=1, nStatus:=0,
+    nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
+fbMonitor(bEnable:=TRUE);
+fbMonitor();
+AssertTrue(fbMonitor.bValid, Message:='Valid again after re-enabling');
+
+TEST_FINISHED();
+
 
 TEST('Moving');
 
-WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=0 (* DMOV *), nStatus:=0, nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
-fbMonitor();
-AssertTrue(fbMonitor.bIsMoving, Message:='Moving');
+// DMOV = 0 means moving and DMOV = 1 means done moving.
+bAllMoving := TRUE;
+FOR nCycle := 1 TO nTestCycles DO
+    WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=0 (* DMOV *), nStatus:=0,
+        nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
+    fbMonitor();
+    bAllMoving := bAllMoving AND fbMonitor.bIsMoving;
+END_FOR
+AssertTrue(bAllMoving, Message:='Moving on every cycle while DMOV = 0');
 
-WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=1 (* DMOV *), nStatus:=0, nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
+WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=1 (* DMOV *), nStatus:=0,
+    nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
 fbMonitor();
-AssertFalse(fbMonitor.bIsMoving, Message:='Not moving');
+AssertFalse(fbMonitor.bIsMoving, Message:='Not moving on the transition cycle');
+
+// The state is retained on the cycles where EPICS does not rewrite DMOV.
+bAllStopped := TRUE;
+FOR nCycle := 1 TO nTestCycles DO
+    fbMonitor();
+    bAllStopped := bAllStopped AND NOT fbMonitor.bIsMoving;
+END_FOR
+AssertTrue(bAllStopped, Message:='Not moving retained over multiple cycles');
+
+WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=0 (* DMOV *), nStatus:=0,
+    nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
+fbMonitor();
+AssertTrue(fbMonitor.bIsMoving, Message:='Moving again after DMOV returns to 0');
 
 TEST_FINISHED();
+
 
 TEST('Position');
 
-WriteData(fbMonitor:=fbMonitor, fRBV:=10.0, nMoving:=0, nStatus:=0, nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
-fbMonitor();
-AssertEquals_LREAL(Actual:=fbMonitor.fPosition, Expected:=10.0, Delta:=0.1, Message:='Position 1 OK');
+bAllValid := TRUE;
+FOR nCycle := 1 TO nTestCycles DO
+    WriteData(fbMonitor:=fbMonitor, fRBV:=10.0, nMoving:=0, nStatus:=0,
+        nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
+    fbMonitor();
+    bAllValid := bAllValid AND fbMonitor.bValid;
+END_FOR
+AssertTrue(bAllValid, Message:='Data valid on every cycle');
+AssertEquals_LREAL(Actual:=fbMonitor.fPosition, Expected:=10.0, Delta:=0.1,
+    Message:='Position 1 OK');
 
-WriteData(fbMonitor:=fbMonitor, fRBV:=20.0, nMoving:=0, nStatus:=0, nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
+// A new readback is picked up on the cycle it arrives ...
+WriteData(fbMonitor:=fbMonitor, fRBV:=20.0, nMoving:=0, nStatus:=0,
+    nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
 fbMonitor();
-AssertEquals_LREAL(Actual:=fbMonitor.fPosition, Expected:=20.0, Delta:=0.1, Message:='Position 2 OK');
+AssertEquals_LREAL(Actual:=fbMonitor.fPosition, Expected:=20.0, Delta:=0.1,
+    Message:='Position 2 OK');
+
+// ... and is held as the last trusted value on the cycles without a write.
+FOR nCycle := 1 TO nTestCycles DO
+    fbMonitor();
+END_FOR
+AssertEquals_LREAL(Actual:=fbMonitor.fPosition, Expected:=20.0, Delta:=0.1,
+    Message:='Position held between EPICS writes');
 
 TEST_FINISHED();
 
+
 TEST('MSTA set');
 
-WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=0, nStatus:=16#0FFFF, nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
-fbMonitor();
+FOR nCycle := 1 TO nTestCycles DO
+    WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=0, nStatus:=16#0FFFF,
+        nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
+    fbMonitor();
+END_FOR
 
+AssertTrue(fbMonitor.nMSTA_Raw = 16#0FFFF, Message:='MSTA raw value 16#0FFFF');
 AssertTrue(fbMonitor.stMSTA.bPositiveDirection, Message:='bPositiveDirection True');
 AssertTrue(fbMonitor.stMSTA.bDone, Message:='bDone True');
 AssertTrue(fbMonitor.stMSTA.bPlusLimitSwitch, Message:='bPlusLimitSwitch True');
@@ -100,9 +260,13 @@ TEST_FINISHED();
 
 TEST('MSTA zero');
 
-WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=0, nStatus:=16#0000, nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
-fbMonitor();
+FOR nCycle := 1 TO nTestCycles DO
+    WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=0, nStatus:=16#0000,
+        nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
+    fbMonitor();
+END_FOR
 
+AssertTrue(fbMonitor.nMSTA_Raw = 16#0000, Message:='MSTA raw value 16#0000');
 AssertFalse(fbMonitor.stMSTA.bPositiveDirection, Message:='bPositiveDirection False');
 AssertFalse(fbMonitor.stMSTA.bDone, Message:='bDone False');
 AssertFalse(fbMonitor.stMSTA.bPlusLimitSwitch, Message:='bPlusLimitSwitch False');
@@ -124,9 +288,13 @@ TEST_FINISHED();
 
 TEST('MSTA something');
 
-WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=0, nStatus:=2#0100_0011_0000_0110, nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
-fbMonitor();
+FOR nCycle := 1 TO nTestCycles DO
+    WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=0, nStatus:=2#0100_0011_0000_0110,
+        nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
+    fbMonitor();
+END_FOR
 
+AssertTrue(fbMonitor.nMSTA_Raw = 2#0100_0011_0000_0110, Message:='MSTA raw value 2#0100_0011_0000_0110');
 AssertFalse(fbMonitor.stMSTA.bPositiveDirection, Message:='bPositiveDirection');
 AssertTrue(fbMonitor.stMSTA.bDone, Message:='bDone');
 AssertTrue(fbMonitor.stMSTA.bPlusLimitSwitch, Message:='bPlusLimitSwitch');
@@ -145,6 +313,33 @@ AssertFalse(fbMonitor.stMSTA.bGainSupport, Message:='bGainSupport');
 AssertFalse(fbMonitor.stMSTA.bCommError, Message:='bCommError');
 AssertFalse(fbMonitor.stMSTA.bMinusLimitSwitch, Message:='bMinusLimitSwitch');
 AssertTrue(fbMonitor.stMSTA.bHomed, Message:='bHomed');
+
+TEST_FINISHED();
+
+
+TEST('MSTA transitions');
+
+// All status bits set for several cycles.
+FOR nCycle := 1 TO nTestCycles DO
+    WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=0, nStatus:=16#0FFFF,
+        nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
+    fbMonitor();
+END_FOR
+AssertTrue(fbMonitor.stMSTA.bHomed, Message:='Homed before the transition');
+
+// Dropping the status must be visible on the cycle the new value arrives ...
+WriteData(fbMonitor:=fbMonitor, fRBV:=0.0, nMoving:=0, nStatus:=16#0000,
+    nRBV_Severity:=0, nStatus_Severity:=0, nMoving_Severity:=0);
+fbMonitor();
+AssertTrue(fbMonitor.nMSTA_Raw = 16#0000, Message:='MSTA cleared on the transition cycle');
+AssertFalse(fbMonitor.stMSTA.bHomed, Message:='Not homed on the transition cycle');
+
+// ... and retained on the cycles where EPICS does not rewrite MSTA.
+FOR nCycle := 1 TO nTestCycles DO
+    fbMonitor();
+END_FOR
+AssertTrue(fbMonitor.nMSTA_Raw = 16#0000, Message:='MSTA cleared retained over multiple cycles');
+AssertFalse(fbMonitor.stMSTA.bHomed, Message:='Not homed retained over multiple cycles');
 
 TEST_FINISHED();
 ]]></ST>
