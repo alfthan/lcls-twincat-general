@@ -2,23 +2,78 @@
 <TcPlcObject Version="1.1.0.1">
   <POU Name="FB_GetPLCIPAddress" Id="{3dc87598-d3fd-46d3-b621-8ecdb5e5ec58}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_GetPLCIPAddress
+(*
+    FB_GetPLCIPAddress - determine the PLC's own IPv4 address.
+
+    Purpose:
+        Enumerate this PLC's network adapters, pick the one that belongs to the controls
+        network and publish its IPv4 address as a dotted-quad string. The adapter is selected
+        by searching for the site tidbit GVL_Logger.sIpTidbit (e.g. '172.21') inside each
+        adapter's address, so no PLC- or host-specific IP has to be configured in the project.
+
+    Usage:
+        - Declare one instance and call it every cycle with bEnable := TRUE. The block is
+          non-blocking; it drives the asynchronous FB_GetAdaptersInfo internally.
+        - Only use sIPAddress while bDone is TRUE. bDone latches TRUE while bEnable is TRUE
+          and is typically used to gate logic that needs the address (for example creating
+          the log socket in FB_LogHandler) and to qualify "PLC is ready" conditions.
+        - While bDone is FALSE the request is retried every tRetryDelay, so a PLC that boots
+          faster than its network comes up still ends up with a valid address.
+        - bError mirrors the adapter enumeration error (a pass-through of
+          fbGetAdapterIP.bError, not latched by this block); the caller decides how to react.
+        - Setting bEnable := FALSE stops the block and freezes sIPAddress, bDone and bError
+          at their last values.
+
+    Objectives:
+        - Zero manual IP configuration in the PLC project.
+        - Self-recovering, bounded retry instead of a single request that can fail at boot.
+        - Failures stay observable through bError instead of an empty sIPAddress alone.
+
+    History:
+        2021-10-22  K. Lauer      Created: split the IP and hostname tools, retry periodically.
+        2021-10-27  K. Lauer      Removed the runtime reset input.
+        2021-11-02  K. Lauer      Fixed variable prefixes.
+        2021-11-30  K. Lauer      Renamed bExecute to bEnable.
+        2023-05-22  J. Sagatowski  Removed the "write product version" flag.
+        2026-11-27  Task #367      Added this header and documented every declaration.
+*)
 VAR_INPUT
+    // Enable input: while TRUE the acquisition runs cyclically. Setting it FALSE stops the
+    // block and freezes sIPAddress, bDone and bError at their last values.
     bEnable			: BOOL;
+    // Retry period [TIME] between acquisition attempts while no address has been found
+    // (bDone = FALSE). Default 10 s.
     tRetryDelay		: TIME := T#10s;
 END_VAR
 VAR_OUTPUT
+    // IPv4 address of the matched adapter as dotted-quad text, e.g. '172.21.12.34'.
+    // STRING(15) holds the longest possible address, '255.255.255.255'. Empty string
+    // until bDone is TRUE.
     sIPAddress		: STRING(15);
 
+    // Status: TRUE once an adapter whose address contains GVL_Logger.sIpTidbit has been
+    // found and sIPAddress is therefore valid. Latched: stays TRUE while bEnable is TRUE.
     bDone 			: BOOL;
+    // Status: TRUE while the adapter enumeration reports an error (pass-through of
+    // fbGetAdapterIP.bError, not latched here). Clears on the next successful enumeration.
     bError			: BOOL;
 END_VAR
 VAR
+    // Adapter enumerator for this PLC. sNetID := '' selects the local PLC; the existing
+    // inline note explains why bExecute is initialized TRUE.
     fbGetAdapterIP 	: FB_GetAdaptersInfo := (bExecute := TRUE, sNetID := ''); // Acquire IP of the correct adapter
 
+    // Search index over fbGetAdapterIP.arrAdapters [count, 0 .. MAX_LOCAL_ADAPTERS].
     iIndex			: UDINT;
 
+    // Retry timer [TIME]: re-armed every tRetryDelay while bDone is FALSE, so an
+    // acquisition that failed at boot is retried instead of being given up on.
     tRetry 			: TON;
+    // One-cycle internal trigger that re-arms tRetry: on the first enabled scan and on each
+    // retry expiry. Never set by the caller.
     bReset			: BOOL;
+    // Internal flag: TRUE after the first enabled cycle, so the initial adapter request is
+    // only issued once (subsequent requests come from the retry timer).
     bInitialized	: BOOL := FALSE;
 
 END_VAR
