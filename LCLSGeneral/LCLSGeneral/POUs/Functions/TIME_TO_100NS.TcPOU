@@ -2,14 +2,25 @@
 <TcPlcObject Version="1.1.0.1">
   <POU Name="TIME_TO_100NS" Id="{ee77a1b2-f30d-4a79-9ca8-80e9b00aec3d}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION TIME_TO_100NS : ULINT
+(*
+    Convert a TIME value (milliseconds) into 100 ns units, the resolution used by the
+    Windows FILETIME timestamps that the time conversion helpers work in.
+    The ms -> 100 ns factor is GeneralConstants.FILETIME_TICKS_PER_MS so the resolution is
+    declared once instead of being repeated as a literal here.
+
+    History:
+    2026-11-27 Replaced the hard-coded 10000 with GeneralConstants.FILETIME_TICKS_PER_MS.
+*)
 VAR_INPUT
+    // Time span to convert, in milliseconds
     nTime : TIME;
 END_VAR
 VAR
 END_VAR
 ]]></Declaration>
     <Implementation>
-      <ST><![CDATA[TIME_TO_100NS := TIME_TO_ULINT(nTime)*10000;]]></ST>
+      <ST><![CDATA[// 1 ms is GeneralConstants.FILETIME_TICKS_PER_MS 100 ns ticks.
+TIME_TO_100NS := TIME_TO_ULINT(nTime) * GeneralConstants.FILETIME_TICKS_PER_MS;]]></ST>
     </Implementation>
   </POU>
 </TcPlcObject>

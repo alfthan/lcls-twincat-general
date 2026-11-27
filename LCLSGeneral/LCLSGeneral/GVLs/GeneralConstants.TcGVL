@@ -9,6 +9,21 @@ VAR_GLOBAL CONSTANT
     // You can make this smaller if you want to use less memory in your program in exchange for limiting your max state count
     // You can make this larger if you want to use states-based FBs sized beyond the EPICS enum limit
     MAX_STATES: UINT := 15;
+
+    // Windows FILETIME tick resolution: one tick is 100 ns, so one millisecond is 10_000 ticks.
+    // FB_UnixTimeStamp and TIME_TO_100NS both convert between FILETIME/100 ns ticks and
+    // milliseconds, so the resolution is declared once here and reused by both.
+    FILETIME_TICKS_PER_MS: ULINT := 10_000;
+    // Milliseconds between the Windows FILETIME epoch (1601-01-01) and the Unix epoch
+    // (1970-01-01), i.e. 11_644_473_600 seconds. Subtracting it from FILETIME-derived
+    // milliseconds yields a Unix timestamp.
+    UNIX_EPOCH_OFFSET_MS: ULINT := 11_644_473_600_000;
+    // Milliseconds per second. Used to split a millisecond timestamp into whole seconds plus a
+    // remainder, and to express millisecond values (the epoch offset) in seconds.
+    MS_PER_S: ULINT := 1_000;
+    // Bit position of the high DWORD inside the 64-bit FILETIME value, which the time source
+    // returns as two 32-bit halves (dwLowDateTime/dwHighDateTime).
+    FILETIME_HIGH_WORD_SHIFT: UINT := 32;
 END_VAR
 ]]></Declaration>
   </GVL>

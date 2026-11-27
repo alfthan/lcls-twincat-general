@@ -8,6 +8,13 @@
 
     This will only sync with the Linux host when both hosts' clocks are correct.
     Largely stolen from stack overflow
+
+    History:
+    2026-11-27 The FILETIME tick resolution, the 1601-to-1970 epoch offset and the high-word
+               shift are no longer literals here: they are the named constants
+               GeneralConstants.FILETIME_TICKS_PER_MS, UNIX_EPOCH_OFFSET_MS,
+               FILETIME_HIGH_WORD_SHIFT and MS_PER_S, so they are declared once and shared
+               with the other time conversion helpers.
 *)
 VAR_INPUT
     // If TRUE, we'll try to update the output on this cycle.
@@ -47,10 +54,17 @@ IF bExecute THEN
         fbTimeConv(
             in := SYSTEMTIME_TO_FILETIME(fbLocalTime.systemTime),
             out => stfileTime);
-        iFull := (SHL(DWORD_TO_ULINT(stfileTime.dwHighDateTime), 32) + DWORD_TO_ULINT(stfileTime.dwLowDateTime)) / 10000 - 11644473600000;
-        fTime := ULINT_TO_LREAL(iFull)/1000;
-        iSeconds := iFull/1000;
-        iMilliseconds := iFull MOD 1000;
+        // Join the two 32-bit halves of the FILETIME value into one 64-bit tick count, convert
+        // 100 ns ticks to milliseconds, then move the epoch from 1601 (FILETIME) to 1970 (Unix).
+        // The tick resolution, epoch offset and half-word shift are declared once in
+        // GeneralConstants so they can be reviewed and corrected in one place.
+        iFull := (SHL(DWORD_TO_ULINT(stfileTime.dwHighDateTime), GeneralConstants.FILETIME_HIGH_WORD_SHIFT)
+                  + DWORD_TO_ULINT(stfileTime.dwLowDateTime)) / GeneralConstants.FILETIME_TICKS_PER_MS
+                  - GeneralConstants.UNIX_EPOCH_OFFSET_MS;
+        // Split the millisecond timestamp into whole seconds plus a remainder.
+        fTime := ULINT_TO_LREAL(iFull) / ULINT_TO_LREAL(GeneralConstants.MS_PER_S);
+        iSeconds := iFull / GeneralConstants.MS_PER_S;
+        iMilliseconds := iFull MOD GeneralConstants.MS_PER_S;
     END_IF
 END_IF]]></ST>
     </Implementation>
