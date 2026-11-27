@@ -1,13 +1,22 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1">
   <POU Name="RUN_TESTS" Id="{e6fc24fd-e279-490c-8a71-fd69372c3aaa}" SpecialFunc="None">
     <Declaration><![CDATA[PROGRAM RUN_TESTS
+(*
+    Purpose: Entry point of the TcUnit suite contained in this library.
+    Usage:   Add the program to a task and call it every cycle; TcUnit.RUN() drives all suites.
+    Objectives: Keep every FB_<Name>_Test instance registered here so the whole library is
+                covered by the same test run.
+    History: 2026-11-27 registered the sanitization tests (convention conv_4530b54b6234)
+*)
 VAR
     // Logger
     {attribute 'analysis' := '-33'}
     fbCbTest : FB_CircuitBreaker_Test;
-    {attribute 'analysis' := '-33'}
     // Data
+    {attribute 'analysis' := '-33'}
+    fbBasicStatsTest : FB_BasicStats_Test;
+    {attribute 'analysis' := '-33'}
     fbCentroidTest : FB_Test_EpicsCentroidMonitor;
     {attribute 'analysis' := '-33'}
     fbMotorTest : FB_Test_EpicsMotorMonitor;
@@ -17,6 +26,9 @@ VAR
     // Hardware
     {attribute 'analysis' := '-33'}
     fbECATAutoRestartTest : FB_ECATAutoRestart_Test;
+    // Sanitization
+    {attribute 'analysis' := '-33'}
+    fbSanitizeLREALTest : FB_SanitizeLREAL_Test;
 END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[TcUnit.RUN();]]></ST>

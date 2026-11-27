@@ -1,14 +1,32 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1">
   <POU Name="FB_BasicStats" Id="{dd720d4e-bff0-4eac-9bd3-db3174a49483}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_BasicStats
 (*
-    Minimalist Array Stats for LREALs
-    2019-10-10 Zachary Lentz
+    Purpose:
+        Minimalist array statistics for LREALs with pytmc control points.
 
-    Calculates the most basic stats for an array and provides pytmc control points.
-    This is an alternative to the TC3 Condition Monitoring library which requires an
-    additional license and had a more complicated interface.
+    Usage:
+        fbStats : FB_BasicStats;
+        fbStats(aSignal := aMeasurements);   // STATS:DATA is EPICS-writable
+        IF fbStats.bValid THEN
+            fAverage := fbStats.fMean;
+        END_IF
+
+    Objectives:
+        Calculates the most basic stats for an array and provides pytmc control points.
+        This is an alternative to the TC3 Condition Monitoring library which requires an
+        additional license and had a more complicated interface.
+
+        The input array arrives from EPICS, so it is sanitized before the math: a NaN/Inf
+        element rejects the whole sample (bInputNonFinite), the previous results are held and
+        bValid reports that they are stale (convention conv_4530b54b6234).
+
+    History:
+        2019-10-10 Zachary Lentz - original implementation
+        2026-11-27 Scirix audit remediation, convention conv_4530b54b6234 - validate every
+                   aSignal element with F_IsFiniteLREAL, reject non-finite samples, hold the
+                   last trusted results and expose bInputNonFinite
 *)
 VAR_IN_OUT
     // Input array of floats
@@ -72,17 +90,30 @@ VAR_OUTPUT
         io: i
     '}
     fRMS: LREAL;
-    // True if the other outputs are valid
+    // True if the other outputs are valid and were computed from a finite input sample
     {attribute 'pytmc' := '
         pv: STATS:VALID
         io: i
+        field: ONAM Valid
+        field: ZNAM Invalid
     '}
     bValid: BOOL;
+    // True if the last calculation saw a NaN/Inf element in aSignal; the statistics above are
+    // then the held results of the last trusted sample
+    {attribute 'pytmc' := '
+        pv: STATS:INPUT_BAD
+        io: i
+        field: ONAM Input rejected
+        field: ZNAM Input OK
+    '}
+    bInputNonFinite: BOOL;
 END_VAR
 VAR
     rTrig: R_TRIG;
     nIndex: DINT;
     nElemsSeen: UDINT;
+    // Elements visited by the input sanity check of the current cycle
+    nElemsChecked: UDINT;
     fSum: LREAL;
     fRMSSum: LREAL;
     fVarianceSum: LREAL;
@@ -99,50 +130,72 @@ IF bReset THEN
     fRange := 0;
     fRMS := 0;
     bValid := FALSE;
+    bInputNonFinite := FALSE;
     bReset := FALSE;
 ELSIF NOT (bExecute OR bAlwaysCalc) THEN
     bValid := FALSE;
 ELSIF bAlwaysCalc OR rTrig.Q THEN
-    // First pass through aSignal: get sum, mean, max, min, rms
-    nElemsSeen := 0;
-    fSum := 0;
-    fRMSSum := 0;
-    fMax := aSignal[LOWER_BOUND(aSignal, 1)];
-    fMin := fMax;
+    // Sanitize the raw EPICS array before the math: a single NaN/Inf element would poison
+    // every statistic, so a contaminated sample is rejected as a whole instead of being
+    // partially averaged (convention conv_4530b54b6234).
+    bInputNonFinite := FALSE;
+    nElemsChecked := 0;
     FOR nIndex := LOWER_BOUND(aSignal, 1) TO UPPER_BOUND(aSignal, 1) DO
-        nElemsSeen := nElemsSeen + 1;
-        fSum := fSum + aSignal[nIndex];
-        fRMSSum := fRMSSum + EXPT(aSignal[nIndex], 2);
-        IF aSignal[nIndex] > fMax THEN
-            fMax := aSignal[nIndex];
-        ELSIF aSignal[nIndex] < fMin tHEN
-            fMin := aSignal[nIndex];
+        IF NOT F_IsFiniteLREAL(fValue := aSignal[nIndex]) THEN
+            bInputNonFinite := TRUE;
+            EXIT;
         END_IF
-        IF nElems > 0 AND nElemsSeen >= nElems THEN
+        nElemsChecked := nElemsChecked + 1;
+        IF nElems > 0 AND nElemsChecked >= nElems THEN
             EXIT;
         END_IF
     END_FOR
-    IF nElemsSeen > 0 THEN
-        fMean := fSum / nElemsSeen;
-        fRange := fMax - fMin;
-        fRMS := SQRT(fRMSSum / nElemsSeen);
 
-        // Second pass through aSignal: get the sum of the variances and then the stdev
+    bValid := FALSE;
+    IF NOT bInputNonFinite THEN
+        // First pass through aSignal: get sum, mean, max, min, rms
         nElemsSeen := 0;
-        fVarianceSum := 0;
+        fSum := 0;
+        fRMSSum := 0;
+        fMax := aSignal[LOWER_BOUND(aSignal, 1)];
+        fMin := fMax;
         FOR nIndex := LOWER_BOUND(aSignal, 1) TO UPPER_BOUND(aSignal, 1) DO
             nElemsSeen := nElemsSeen + 1;
-            fVarianceSum := fVarianceSum + (aSignal[nIndex] - fMean) * (aSignal[nIndex] - fMean);
+            fSum := fSum + aSignal[nIndex];
+            fRMSSum := fRMSSum + EXPT(aSignal[nIndex], 2);
+            IF aSignal[nIndex] > fMax THEN
+                fMax := aSignal[nIndex];
+            ELSIF aSignal[nIndex] < fMin tHEN
+                fMin := aSignal[nIndex];
+            END_IF
             IF nElems > 0 AND nElemsSeen >= nElems THEN
                 EXIT;
             END_IF
         END_FOR
-        IF nElemsSeen > 1 THEN
-            fVarianceMean := fVarianceSum / (nElemsSeen - 1);
-            fStDev := SQRT(fVarianceMean);
-            bValid := TRUE;
+        IF nElemsSeen > 0 THEN
+            fMean := fSum / nElemsSeen;
+            fRange := fMax - fMin;
+            fRMS := SQRT(fRMSSum / nElemsSeen);
+
+            // Second pass through aSignal: get the sum of the variances and then the stdev
+            nElemsSeen := 0;
+            fVarianceSum := 0;
+            FOR nIndex := LOWER_BOUND(aSignal, 1) TO UPPER_BOUND(aSignal, 1) DO
+                nElemsSeen := nElemsSeen + 1;
+                fVarianceSum := fVarianceSum + (aSignal[nIndex] - fMean) * (aSignal[nIndex] - fMean);
+                IF nElems > 0 AND nElemsSeen >= nElems THEN
+                    EXIT;
+                END_IF
+            END_FOR
+            IF nElemsSeen > 1 THEN
+                fVarianceMean := fVarianceSum / (nElemsSeen - 1);
+                fStDev := SQRT(fVarianceMean);
+                bValid := TRUE;
+            END_IF
         END_IF
     END_IF
+    // With bInputNonFinite TRUE nothing above was recomputed: the previous outputs are held and
+    // bValid stays FALSE, so consumers can tell the published numbers are stale.
 END_IF]]></ST>
     </Implementation>
   </POU>

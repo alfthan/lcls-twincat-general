@@ -1,10 +1,32 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1">
   <POU Name="FB_ThermoCouple" Id="{cc00895a-0264-4382-820e-9cfa9062e545}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_ThermoCouple
 (*
-    Deprecated as of 2020-03-02, please use FB_TempSensor instead
-    2019-10-09 Zachary Lentz
+    Purpose:
+        Converts the integer counts of a thermocouple input terminal into a temperature,
+        honouring the terminal's error / underrange / overrange diagnostics.
+
+    Usage:
+        fbThermoCouple : FB_ThermoCouple;
+        // iRaw, bError, bUnderrange and bOverrange are linked to the terminal
+        fTempC := fbThermoCouple.fTemp;
+        IF NOT fbThermoCouple.bValid THEN
+            // fTemp is holding its last trusted value
+        END_IF
+
+    Objectives:
+        Never publish an untrustworthy temperature: a railed (underrange/overrange), open or
+        errored sensor must not be reported as a plausible-looking number. The reading is gated
+        on the terminal diagnostics, the last trusted value is held while invalid, and bValid
+        states which of the two fTemp currently is (convention conv_4530b54b6234).
+
+    History:
+        2019-10-09 Zachary Lentz - original scaling
+        2020-03-02 Deprecated in favour of FB_TempSensor
+        2026-11-27 Scirix audit remediation, convention conv_4530b54b6234 - gate fTemp on
+                   bUnderrange/bOverrange/bError through the shared FB_SanitizeLREAL, guard a
+                   zero scaling ratio, hold the last trusted value and expose bValid
 *)
 {warning 'Function Block FB_ThermoCouple is deprecated and may be removed in a future release'}
 VAR_INPUT
@@ -34,14 +56,45 @@ VAR_OUTPUT
 
     bUnderrange AT %I*: BOOL;
     bOverrange AT %I*: BOOL;
+
+    // TRUE while fTemp is a fresh reading from a healthy sensor
+    {attribute 'pytmc' := '
+        pv: STC:VALID
+        io: input
+        field: ONAM Valid
+        field: ZNAM Invalid
+    '}
+    bValid: BOOL;
 END_VAR
 VAR
     iRaw AT %I*: INT;
+    // Temperature candidate for this cycle, before sanitization
+    fCandidate: LREAL;
+    // Shared sanitizer: holds the last trusted temperature while the sensor is unhealthy
+    fbSanitize: FB_SanitizeLREAL;
 END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[// The manual states that we are disconnected if we are both overrange and in an error state
 bConnected := NOT (bOverrange AND bError);
-fTemp := INT_TO_LREAL(iRaw) / iScale;]]></ST>
+
+// Guard the scaling ratio before dividing: a zero ratio is a configuration error and must not
+// produce a bogus temperature.
+IF iScale = 0 THEN
+    fCandidate := 0.0;
+ELSE
+    fCandidate := INT_TO_LREAL(iRaw) / iScale;
+END_IF
+
+// A railed (underrange/overrange), open or errored terminal publishes no trustworthy
+// temperature: the shared sanitizer rejects the reading, holds the last trusted value and
+// reports validity, so downstream logic and EPICS cannot mistake a stale value for a fresh one.
+fbSanitize(
+    fIn := fCandidate,
+    bCheckRange := FALSE,
+    bValueTrusted := NOT (bUnderrange OR bOverrange OR bError) AND (iScale <> 0));
+
+fTemp := fbSanitize.fOut;
+bValid := fbSanitize.bValid;]]></ST>
     </Implementation>
   </POU>
 </TcPlcObject>

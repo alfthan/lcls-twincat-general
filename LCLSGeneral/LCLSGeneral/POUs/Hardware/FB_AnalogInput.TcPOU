@@ -1,17 +1,41 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4022.18">
   <POU Name="FB_AnalogInput" Id="{c3bf2f11-e399-406d-ba95-ae8960e90a27}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_AnalogInput
 (*
-    Converts the integer from an analog input terminal to a real unit value (e.g., volts)
-    2019-10-09 Zachary Lentz
+    Purpose:
+        Converts the integer counts of an analog input terminal into a scaled LREAL unit value
+        (e.g., volts) and publishes it together with a validity flag.
+
+    Usage:
+        fbAnalogIn : FB_AnalogInput := (iTermBits := 16, fTermMin := 0.0, fTermMax := 10.0);
+        // iRaw is linked to the terminal in the I/O configuration
+        fVolts := fbAnalogIn.fReal;
+        IF NOT fbAnalogIn.bValid THEN
+            // fReal is holding its last trusted value
+        END_IF
+
+    Objectives:
+        Never publish unsanitized hardware data. Because the scaling parameters are
+        EPICS-writable, they are re-validated every cycle (no silently stale fScale), raw
+        counts outside the configured terminal span are rejected, and the last trusted value
+        is held while either the measurement or the configuration is invalid. bValid and
+        bConfigError make that state observable to logic and to EPICS
+        (convention conv_4530b54b6234).
+
+    History:
+        2019-10-09 Zachary Lentz - original scaling
+        2026-11-27 Scirix audit remediation, convention conv_4530b54b6234 - validate the
+                   EPICS-writable configuration, reject out-of-span counts through the shared
+                   FB_SanitizeLREAL, hold the last trusted value and expose bValid/bConfigError
 *)
 VAR_INPUT
     // Connect this input to the terminal
     iRaw AT %I*: DINT;
     // The number of bits correlated with the terminal's max value. This is not necessarily the resolution parameter.
     iTermBits: UINT;
-    // The fReal value correlated with the terminal's max value
+    // The fReal value correlated with the terminal's max value. Together with fTermMin this
+    // defines the span of counts accepted as valid; a railed count outside it is rejected.
     fTermMax: LREAL;
     // The fReal value correlated with the terminal's min value
     fTermMin: LREAL;
@@ -28,24 +52,82 @@ VAR_INPUT
     fOffset : LREAL;
 END_VAR
 VAR_OUTPUT
-    // The real value read from the output
+    // The real value read from the output; held at the last trusted value while invalid
     {attribute 'pytmc' := '
         pv: VAL
         io: i
     '}
     fReal: LREAL;
+
+    // TRUE while fReal is a fresh, in-range measurement
+    {attribute 'pytmc' := '
+        pv: VALID
+        io: i
+        field: ONAM Valid
+        field: ZNAM Invalid
+    '}
+    bValid: BOOL;
+
+    // TRUE while the scaling configuration (bits, span, resolution, offset) is unusable
+    {attribute 'pytmc' := '
+        pv: CONFIG_ERR
+        io: i
+        field: ONAM Config error
+        field: ZNAM Config OK
+    '}
+    bConfigError: BOOL;
 END_VAR
 VAR
+    // Counts per unit value, derived from iTermBits and the configured terminal span
     fScale: LREAL;
+    // Scaled candidate value for this cycle, before sanitization
+    fScaled: LREAL;
+    // Lowest/highest physical value the configured terminal span can represent
+    fPhysicalMin: LREAL;
+    fPhysicalMax: LREAL;
+    // Shared sanitizer: rejects out-of-span counts and holds the last trusted value
+    fbSanitize: FB_SanitizeLREAL;
+END_VAR
+VAR CONSTANT
+    // Smallest/largest terminal width the conversion can represent
+    K_MIN_TERM_BITS: UINT := 1;
+    K_MAX_TERM_BITS: UINT := 32;
 END_VAR]]></Declaration>
     <Implementation>
-      <ST><![CDATA[IF fScale = 0 AND fTermMax > fTermMin THEN
+      <ST><![CDATA[// The scaling parameters are EPICS-writable, so they are re-validated every cycle: a NaN/Inf
+// or inverted span must never leave fScale behind at a stale value nor publish garbage.
+bConfigError := (iTermBits < K_MIN_TERM_BITS)
+    OR (iTermBits > K_MAX_TERM_BITS)
+    OR NOT F_IsFiniteLREAL(fValue := fTermMax)
+    OR NOT F_IsFiniteLREAL(fValue := fTermMin)
+    OR NOT F_IsFiniteLREAL(fValue := fResolution)
+    OR NOT F_IsFiniteLREAL(fValue := fOffset)
+    OR (fTermMax <= fTermMin)
+    OR (fResolution = 0.0);
+
+IF NOT bConfigError THEN
     fScale := (EXPT(2, iTermBits) - 1) / (fTermMax - fTermMin);
+    fScaled := DINT_TO_LREAL(iRaw) / fScale + fTermMin;
+    fScaled := fScaled * fResolution + fOffset;
+
+    // The configured span maps counts 0 .. 2^bits-1 onto fTermMin..fTermMax, so the physical
+    // span is the scaled term limits; resolution+offset may invert it, hence MIN/MAX.
+    fPhysicalMin := MIN(fTermMin * fResolution + fOffset, fTermMax * fResolution + fOffset);
+    fPhysicalMax := MAX(fTermMin * fResolution + fOffset, fTermMax * fResolution + fOffset);
 END_IF
-IF fScale <> 0 THEN
-    fReal := iRaw / fScale + fTermMin;
-    fReal := fReal * fResolution + fOffset;
-END_IF]]></ST>
+
+// Route the conversion through the shared sanitizer: counts outside the terminal span are
+// rejected, the last trusted value is held, and bValid reports whether fReal is fresh.
+// While the configuration is unusable nothing is trusted, so the previous value is held.
+fbSanitize(
+    fIn := fScaled,
+    fMin := fPhysicalMin,
+    fMax := fPhysicalMax,
+    bCheckRange := NOT bConfigError,
+    bValueTrusted := NOT bConfigError);
+
+fReal := fbSanitize.fOut;
+bValid := fbSanitize.bValid;]]></ST>
     </Implementation>
   </POU>
 </TcPlcObject>

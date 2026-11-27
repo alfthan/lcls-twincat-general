@@ -1,7 +1,27 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1">
   <POU Name="FB_ECATepics" Id="{38ed9c12-1d10-4e74-8cdb-42be0630d47c}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_ECATepics
+(*
+    Purpose:
+        Exposes one EtherCAT slave's state over EPICS (device state, error text, description)
+        and lets EPICS request a slave state change.
+
+    Usage:
+        fbEcat : FB_ECATepics := (sNetId := '', nSlaveAddr := 1001, sDeviceDesc := 'TERM #1');
+        // eReqState / bCmdReqState are EPICS-writable, eDevState / bError are published
+
+    Objectives:
+        Never forward a raw EPICS value to the device: the requested state is validated against
+        the known E_ECAT_STATES set, only the last trusted state reaches FB_EcSetSlaveState,
+        and bReqStateValid reports whether the current request was accepted
+        (convention conv_4530b54b6234).
+
+    History:
+        2026-11-27 Scirix audit remediation, convention conv_4530b54b6234 - validate the
+                   EPICS-written eReqState, forward only the last trusted state and expose
+                   bReqStateValid
+*)
 VAR_INPUT
     sNetId          : T_AmsNetId;
     nSlaveAddr      : UINT;
@@ -22,6 +42,17 @@ VAR
     '}
     eReqState : E_ECAT_STATES;
     ePrevReqState : E_ECAT_STATES;
+    // Last state that passed the EPICS input check; only this value reaches the device
+    eReqStateTrusted : E_ECAT_STATES;
+
+    // TRUE while the eReqState value written from EPICS is a known device state
+    {attribute 'pytmc' := '
+        pv: bReqStateValid
+        io: i
+        field: ONAM Request accepted
+        field: ZNAM Request rejected
+    '}
+    bReqStateValid : BOOL;
 
     {attribute 'pytmc' := '
         pv: eDevState
@@ -68,12 +99,34 @@ IF bInit THEN
     bInit := FALSE;
     fbgetStatusTimer.IN:= TRUE;
     ePrevReqState :=  eReqState;
+    // Nothing is trusted yet: start from INIT so that an invalid first request can never
+    // command the device into an undefined state.
+    eReqStateTrusted := E_ECAT_STATES.INIT;
+END_IF
+
+// eReqState is written from EPICS, so it is validated before it can reach the device: only a
+// known device state is forwarded, anything else is rejected while the last trusted state is
+// held and reported through bReqStateValid (convention conv_4530b54b6234).
+CASE eReqState OF
+    E_ECAT_STATES.INIT,
+    E_ECAT_STATES.PREOP,
+    E_ECAT_STATES.BOOTSTRAP,
+    E_ECAT_STATES.SAFEOP,
+    E_ECAT_STATES.OP,
+    E_ECAT_STATES.ERROR:
+        bReqStateValid := TRUE;
+ELSE
+    bReqStateValid := FALSE;
+END_CASE
+
+IF bReqStateValid THEN
+    eReqStateTrusted := eReqState;
 END_IF
 
 fbsetSlaveState(sNetId:=sNetId,
     nSlaveAddr:= nSlaveAddr,
     bExecute:= bCmdReqState,
-    reqState:= eReqState);
+    reqState:= eReqStateTrusted);
 
 fbgetSlaveState(sNetId:=sNetId,
     nSlaveAddr:= nSlaveAddr,

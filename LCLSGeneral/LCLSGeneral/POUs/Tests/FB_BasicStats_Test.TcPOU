@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.0">
+  <POU Name="FB_BasicStats_Test" Id="{84017D17-9B25-4A86-902B-92E5CCB7D83B}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_BasicStats_Test EXTENDS TcUnit.FB_TestSuite
+(*
+    Purpose:
+        Unit tests for FB_BasicStats: a clean sample must be averaged normally, while a sample
+        containing a NaN/Inf element (as can arrive over the EPICS STATS:DATA PV) must be
+        rejected, with the previous results held and bValid/bInputNonFinite reporting it.
+
+    Usage:
+        Instantiate in RUN_TESTS and let TcUnit.RUN() drive it.
+
+    Objectives:
+        Lock down the sanitize-and-hold behaviour required by convention conv_4530b54b6234 so
+        that a corrupt input can never be published as a plausible statistic.
+
+    History:
+        2026-11-27 Scirix audit remediation, convention conv_4530b54b6234
+*)
+VAR
+    // Device under test
+    fbStats : FB_BasicStats;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[TestComputesCleanInput();
+TestRejectsNonFiniteElement();]]></ST>
+    </Implementation>
+    <Method Name="TestComputesCleanInput" Id="{F9F474A9-816C-4E31-8A13-0FACF26213AE}">
+      <Declaration><![CDATA[METHOD TestComputesCleanInput
+(*
+    A finite sample must produce the usual statistics and be reported valid.
+*)
+VAR_INST
+    aTestData : ARRAY[0..3] OF LREAL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[TEST('TestComputesCleanInput');
+aTestData[0] := 1.0;
+aTestData[1] := 2.0;
+aTestData[2] := 3.0;
+aTestData[3] := 4.0;
+
+// Reset first so the block starts from a known state, then calculate once.
+fbStats(aSignal := aTestData, bReset := TRUE, nElems := 0);
+fbStats(aSignal := aTestData, bReset := FALSE, bAlwaysCalc := TRUE);
+
+AssertTrue(fbStats.bValid, 'clean sample not reported valid');
+AssertFalse(fbStats.bInputNonFinite, 'clean sample reported as containing NaN/Inf');
+AssertTrue(ABS(fbStats.fMean - 2.5) < 0.000001, 'mean incorrect');
+AssertTrue(ABS(fbStats.fMin - 1.0) < 0.000001, 'min incorrect');
+AssertTrue(ABS(fbStats.fMax - 4.0) < 0.000001, 'max incorrect');
+AssertTrue(ABS(fbStats.fRange - 3.0) < 0.000001, 'range incorrect');
+
+TEST_FINISHED();]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="TestRejectsNonFiniteElement" Id="{470F6383-FCF7-46AC-9EA2-7436B2D71A70}">
+      <Declaration><![CDATA[METHOD TestRejectsNonFiniteElement
+(*
+    A single NaN element must reject the whole sample: bInputNonFinite goes TRUE, bValid goes
+    FALSE, and the results of the last trusted sample are held.
+    The NaN is produced by overlaying its IEEE-754 bit pattern rather than by arithmetic.
+*)
+VAR_INST
+    aTestData : ARRAY[0..3] OF LREAL;
+    // Bit pattern for NaN (16#7FF8...), low DWORD first
+    aNaN : ARRAY[0..1] OF DWORD := [16#00000000, 16#7FF80000];
+    fNaN : LREAL;
+    bBitsPrepared : BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[TEST('TestRejectsNonFiniteElement');
+IF NOT bBitsPrepared THEN
+    MEMCPY(ADR(fNaN), ADR(aNaN), SIZEOF(fNaN));
+    bBitsPrepared := TRUE;
+END_IF
+
+aTestData[0] := 1.0;
+aTestData[1] := 2.0;
+aTestData[2] := 3.0;
+aTestData[3] := 4.0;
+
+// Cycle 1: a trusted sample is calculated
+fbStats(aSignal := aTestData, bReset := TRUE, nElems := 0);
+fbStats(aSignal := aTestData, bReset := FALSE, bAlwaysCalc := TRUE);
+AssertTrue(ABS(fbStats.fMean - 2.5) < 0.000001, 'setup: clean mean incorrect');
+
+// Cycle 2: one element becomes NaN
+aTestData[2] := fNaN;
+fbStats(aSignal := aTestData, bReset := FALSE, bAlwaysCalc := TRUE);
+AssertTrue(fbStats.bInputNonFinite, 'NaN element not detected');
+AssertFalse(fbStats.bValid, 'contaminated sample reported valid');
+AssertTrue(ABS(fbStats.fMean - 2.5) < 0.000001, 'last trusted mean not held');
+AssertTrue(ABS(fbStats.fMax - 4.0) < 0.000001, 'last trusted max not held');
+
+// Cycle 3: the sample recovers and the statistics are recomputed
+aTestData[2] := 3.0;
+fbStats(aSignal := aTestData, bReset := FALSE, bAlwaysCalc := TRUE);
+AssertFalse(fbStats.bInputNonFinite, 'recovered sample still reported as containing NaN/Inf');
+AssertTrue(fbStats.bValid, 'recovered sample not reported valid');
+
+TEST_FINISHED();]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>

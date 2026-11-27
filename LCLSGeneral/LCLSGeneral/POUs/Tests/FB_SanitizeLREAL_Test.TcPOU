@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1" ProductVersion="3.1.4024.0">
+  <POU Name="FB_SanitizeLREAL_Test" Id="{CF9ACD76-5C19-4361-A3C0-1C5BD2D7724C}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_SanitizeLREAL_Test EXTENDS TcUnit.FB_TestSuite
+(*
+    Purpose:
+        Unit tests for FB_SanitizeLREAL: the shared sanitizing gate must publish finite,
+        in-range values, reject NaN/Inf and out-of-range or explicitly untrusted values, hold
+        the last trusted value while invalid, and report that state on bValid.
+
+    Usage:
+        Instantiate in RUN_TESTS and let TcUnit.RUN() drive it.
+
+    Objectives:
+        Lock down the reject/hold/validity behaviour that convention conv_4530b54b6234
+        requires, so that changes to the sanitizer cannot silently start publishing bad data.
+
+    History:
+        2026-11-27 Scirix audit remediation, convention conv_4530b54b6234
+*)
+VAR
+    // Device under test
+    fbSanitize : FB_SanitizeLREAL;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[TestPublishesValidValue();
+TestHoldsLastTrustedOnNonFinite();
+TestRejectsOutOfRange();
+TestRejectsUntrustedValue();
+TestResetClearsHeldValue();]]></ST>
+    </Implementation>
+    <Method Name="TestPublishesValidValue" Id="{1681DE4E-36E9-4F85-85C3-2B6352CDDB38}">
+      <Declaration><![CDATA[METHOD TestPublishesValidValue
+(*
+    A finite, in-range value must be published as-is and reported valid.
+*)
+VAR_INST
+    // No per-test state required
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[TEST('TestPublishesValidValue');
+fbSanitize(fIn := 0.5, fMin := -1.0, fMax := 1.0, bCheckRange := TRUE, bValueTrusted := TRUE, bReset := FALSE);
+
+AssertTrue(fbSanitize.bValid, 'in-range finite input was reported invalid');
+AssertFalse(fbSanitize.bNotFinite, 'finite input flagged as non-finite');
+AssertFalse(fbSanitize.bOutOfRange, 'in-range input flagged as out of range');
+AssertTrue(fbSanitize.bHasTrustedValue, 'accepted value was not latched');
+AssertTrue(ABS(fbSanitize.fOut - 0.5) < 0.000001, 'accepted input was not published');
+
+TEST_FINISHED();]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="TestHoldsLastTrustedOnNonFinite" Id="{196884E4-E8D9-4DF2-B4A4-CFDB2D11BBBF}">
+      <Declaration><![CDATA[METHOD TestHoldsLastTrustedOnNonFinite
+(*
+    NaN and +/-Inf must be rejected and the previously trusted value must be held.
+    The non-finite values are produced by overlaying their IEEE-754 bit patterns, so the test
+    does not depend on floating point arithmetic overflowing in a particular way.
+*)
+VAR_INST
+    // Bit patterns for NaN (16#7FF8...) and +Inf (16#7FF0...), low DWORD first
+    aNaN : ARRAY[0..1] OF DWORD := [16#00000000, 16#7FF80000];
+    aInf : ARRAY[0..1] OF DWORD := [16#00000000, 16#7FF00000];
+    fNaN : LREAL;
+    fInf : LREAL;
+    bBitsPrepared : BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[TEST('TestHoldsLastTrustedOnNonFinite');
+IF NOT bBitsPrepared THEN
+    MEMCPY(ADR(fNaN), ADR(aNaN), SIZEOF(fNaN));
+    MEMCPY(ADR(fInf), ADR(aInf), SIZEOF(fInf));
+    bBitsPrepared := TRUE;
+END_IF
+
+// Cycle 1: a good reading is latched as the trusted value
+fbSanitize(fIn := 2.0, fMin := -10.0, fMax := 10.0, bCheckRange := TRUE, bValueTrusted := TRUE, bReset := FALSE);
+AssertTrue(fbSanitize.bValid, 'setup: good reading not accepted');
+
+// Cycle 2: NaN arrives from the field
+fbSanitize(fIn := fNaN, fMin := -10.0, fMax := 10.0, bCheckRange := TRUE, bValueTrusted := TRUE, bReset := FALSE);
+AssertFalse(fbSanitize.bValid, 'NaN input was reported valid');
+AssertTrue(fbSanitize.bNotFinite, 'NaN input not flagged as non-finite');
+AssertTrue(ABS(fbSanitize.fOut - 2.0) < 0.000001, 'last trusted value not held for NaN');
+
+// Cycle 3: +Inf arrives from the field
+fbSanitize(fIn := fInf, fMin := -10.0, fMax := 10.0, bCheckRange := TRUE, bValueTrusted := TRUE, bReset := FALSE);
+AssertFalse(fbSanitize.bValid, 'Inf input was reported valid');
+AssertTrue(fbSanitize.bNotFinite, 'Inf input not flagged as non-finite');
+AssertTrue(ABS(fbSanitize.fOut - 2.0) < 0.000001, 'last trusted value not held for Inf');
+
+// Cycle 4: the field recovers
+fbSanitize(fIn := 3.0, fMin := -10.0, fMax := 10.0, bCheckRange := TRUE, bValueTrusted := TRUE, bReset := FALSE);
+AssertTrue(fbSanitize.bValid, 'recovered input not accepted');
+AssertTrue(ABS(fbSanitize.fOut - 3.0) < 0.000001, 'recovered input not published');
+
+TEST_FINISHED();]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="TestRejectsOutOfRange" Id="{6B619350-8106-454C-9855-DC669542E6AA}">
+      <Declaration><![CDATA[METHOD TestRejectsOutOfRange
+(*
+    A finite value outside [fMin, fMax] must be rejected and the trusted value held; with
+    bCheckRange FALSE only NaN/Inf are rejected, so the same value must then be accepted.
+*)
+VAR_INST
+    // No per-test state required
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[TEST('TestRejectsOutOfRange');
+// Cycle 1: latch a trusted value
+fbSanitize(fIn := 1.0, fMin := -1.0, fMax := 1.0, bCheckRange := TRUE, bValueTrusted := TRUE, bReset := FALSE);
+
+// Cycle 2: railed, finite but outside the accepted range
+fbSanitize(fIn := 42.0, fMin := -1.0, fMax := 1.0, bCheckRange := TRUE, bValueTrusted := TRUE, bReset := FALSE);
+AssertFalse(fbSanitize.bValid, 'out of range input was reported valid');
+AssertTrue(fbSanitize.bOutOfRange, 'out of range input not flagged');
+AssertFalse(fbSanitize.bNotFinite, 'finite input flagged as non-finite');
+AssertTrue(ABS(fbSanitize.fOut - 1.0) < 0.000001, 'last trusted value not held for out of range input');
+
+// Cycle 3: the same value with range checking disabled is accepted
+fbSanitize(fIn := 42.0, fMin := -1.0, fMax := 1.0, bCheckRange := FALSE, bValueTrusted := TRUE, bReset := FALSE);
+AssertTrue(fbSanitize.bValid, 'finite input rejected although range checking is disabled');
+AssertTrue(ABS(fbSanitize.fOut - 42.0) < 0.000001, 'finite input not published with range checking disabled');
+
+TEST_FINISHED();]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="TestRejectsUntrustedValue" Id="{1BE3A239-9809-4405-8253-1723C6C4307C}">
+      <Declaration><![CDATA[METHOD TestRejectsUntrustedValue
+(*
+    A caller that knows the reading is untrustworthy (sensor error, bad configuration) clears
+    bValueTrusted; the value must then be rejected even though its arithmetic looks fine.
+*)
+VAR_INST
+    // No per-test state required
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[TEST('TestRejectsUntrustedValue');
+// Cycle 1: latch a trusted value
+fbSanitize(fIn := 7.0, fMin := -10.0, fMax := 10.0, bCheckRange := TRUE, bValueTrusted := TRUE, bReset := FALSE);
+
+// Cycle 2: same value but marked untrusted by the caller
+fbSanitize(fIn := 8.0, fMin := -10.0, fMax := 10.0, bCheckRange := TRUE, bValueTrusted := FALSE, bReset := FALSE);
+AssertFalse(fbSanitize.bValid, 'untrusted input was reported valid');
+AssertFalse(fbSanitize.bNotFinite, 'untrusted finite input flagged as non-finite');
+AssertFalse(fbSanitize.bOutOfRange, 'untrusted in-range input flagged as out of range');
+AssertTrue(ABS(fbSanitize.fOut - 7.0) < 0.000001, 'last trusted value not held for untrusted input');
+
+TEST_FINISHED();]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="TestResetClearsHeldValue" Id="{3D480698-A75F-4B28-A4C4-27D7A6F5ADB7}">
+      <Declaration><![CDATA[METHOD TestResetClearsHeldValue
+(*
+    bReset must drop the held value, so that a re-configured signal does not keep publishing
+    a value from its previous configuration.
+*)
+VAR_INST
+    // No per-test state required
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[TEST('TestResetClearsHeldValue');
+// Cycle 1: latch a trusted value
+fbSanitize(fIn := 4.0, fMin := -10.0, fMax := 10.0, bCheckRange := TRUE, bValueTrusted := TRUE, bReset := FALSE);
+AssertTrue(fbSanitize.bHasTrustedValue, 'setup: trusted value not latched');
+
+// Cycle 2: reset in the same cycle as a new value - the value is discarded
+fbSanitize(fIn := 5.0, fMin := -10.0, fMax := 10.0, bCheckRange := TRUE, bValueTrusted := TRUE, bReset := TRUE);
+AssertFalse(fbSanitize.bValid, 'value accepted in the same cycle as bReset');
+AssertFalse(fbSanitize.bHasTrustedValue, 'bReset did not clear the trusted flag');
+AssertTrue(ABS(fbSanitize.fOut) < 0.000001, 'bReset did not clear the held value');
+
+// Cycle 3: the next good reading is latched again
+fbSanitize(fIn := 5.0, fMin := -10.0, fMax := 10.0, bCheckRange := TRUE, bValueTrusted := TRUE, bReset := FALSE);
+AssertTrue(fbSanitize.bValid, 'reading after reset not accepted');
+AssertTrue(ABS(fbSanitize.fOut - 5.0) < 0.000001, 'reading after reset not published');
+
+TEST_FINISHED();]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>

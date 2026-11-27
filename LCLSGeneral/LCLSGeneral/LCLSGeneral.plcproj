@@ -119,6 +119,9 @@
     <Compile Include="POUs\Data\FB_LREALFromEPICS.TcPOU">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="POUs\Data\FB_SanitizeLREAL.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="POUs\Data\FB_STRINGFromEPICS.TcPOU">
       <SubType>Code</SubType>
     </Compile>
@@ -206,6 +209,9 @@
     <Compile Include="POUs\Functions\F_ConvertTicksToUnixTimestamp.TcPOU">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="POUs\Functions\F_IsFiniteLREAL.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="POUs\Functions\TIME_TO_100NS.TcPOU">
       <SubType>Code</SubType>
     </Compile>
@@ -276,6 +282,9 @@
     <Compile Include="POUs\RUN_TESTS.TcPOU">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="POUs\Tests\FB_BasicStats_Test.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="POUs\Tests\FB_CircuitBreaker_Test.TcPOU">
       <SubType>Code</SubType>
     </Compile>
@@ -283,6 +292,9 @@
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="POUs\Tests\FB_FlutterDetection_Test.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="POUs\Tests\FB_SanitizeLREAL_Test.TcPOU">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="POUs\Tests\FB_Test_EpicsCentroidMonitor.TcPOU">
