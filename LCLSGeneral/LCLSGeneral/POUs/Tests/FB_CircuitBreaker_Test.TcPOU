@@ -70,6 +70,10 @@ VAR_INST
     tNice : TON := (PT:=T#5s);
     tTrickle : TON := (PT:= GVL_Logger.nTrickleTripTime + T#1s);
     fbLogHandler : FB_LogHandler;
+    // Number of times the (deliberately quiet) logger was actually asked to
+    // evaluate its circuit breaker. Used to prove the 'quiet logger stays up'
+    // half of the assertion is not vacuous because it was never invoked.
+    nNiceCallCount : UINT;
 END_VAR]]></Declaration>
       <Implementation>
         <ST><![CDATA[TEST('ManySmall');
@@ -87,14 +91,22 @@ IF tNoisy.Q THEN
     fbLogNoisy.CircuitBreaker();
 END_IF
 
-// Call this guy every 5s or so
-tNice(IN := NOT tNoisy.Q);
+// Call this guy every 5s or so. Note that tNice must be self-retriggering:
+// driving it from NOT tNoisy.Q would reset it on every one-cycle pulse of
+// tNoisy (roughly every 50ms), so its 5s PT would never expire and the quiet
+// logger would never be exercised at all.
+tNice(IN := NOT tNice.Q);
 IF tNice.Q THEN
     fbLogNice.CircuitBreaker();
+    nNiceCallCount := nNiceCallCount + 1;
 END_IF
 
 tTrickle(IN:=TRUE);
 IF tTrickle.Q THEN
+    // Guard against a vacuous pass: the quiet logger must actually have been
+    // asked to evaluate its circuit breaker for 'it did not trip' to mean anything.
+    AssertTrue(nNiceCallCount > 0,
+            'Quiet logger should have been invoked at least once.');
     AssertTrue(fbLogNoisy.bLocalTrickleTripped AND NOT fbLogNice.bLocalTrickleTripped,
             'Only Noisy should be tripped.');
     TEST_FINISHED_NAMED('ManySmall');
