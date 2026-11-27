@@ -4,6 +4,15 @@
     <Declaration><![CDATA[(*
 Function block to link an analog value from EPICS to an LREAL on the PLC
 
+Purpose:
+
+    Receive one floating-point value from an EPICS link record (created by the
+    pytmc pragma shown under Usage) and hold it in `.fValue` for use by PLC
+    control logic, together with a `.bValid` flag that reports whether EPICS is
+    still writing values and whether the link is still within the accepted
+    severity. This block owns the IOC heartbeat/timeout handling and the
+    link-severity check, so no caller has to re-implement them.
+
 Usage:
 
     {attribute 'pytmc' := '
@@ -18,27 +27,103 @@ push a value through to the PLC with this function block.
 As this block takes care of IOC heartbeat signals and monitors the link and value severity,
 the end-user should then only have to look at `.bValid` and `.fValue`. These are guaranteed to
 be up-to-date and valid within `tTimeout` seconds.
+
+Call the instance once per PLC cycle and treat `.fValue` as usable only while
+`.bValid` is TRUE:
+
+    fbLinkedValue1();
+    IF fbLinkedValue1.bValid THEN
+        fPressure := fbLinkedValue1.fValue;  // engineering units of the link PV
+    END_IF
+
+Objectives:
+
+    - Give the analog data path from EPICS one block that owns the timeout and
+      link-severity handling, so control logic consumes one value plus one
+      validity flag instead of repeating those checks at every call site.
+    - Never let a stale or alarming link reach control logic unnoticed: `.bValid`
+      drops when EPICS stops writing for `tTimeout`, and when the reported link
+      severity is worse than `iMaximumValidSeverity`.
+    - Keep the last good value available in `.fValue` while the link is not
+      valid, so a caller can hold its last commanded state rather than act on
+      an invalid sample.
+
+History:
+
+    2020-02-26  K Lauer: created the function block (afb0619).
+    2020-08-31  K Lauer: added the `iMaximumValidSeverity` input and relaxed the
+                validity test from `iLastValidSeverity = 0` (NO_ALARM only) to
+                `iLastValidSeverity <= iMaximumValidSeverity` (5514329).
+    2021-11-02  K Lauer: style pass, re-formatted by pre-commit (567ce06).
+    2023-05-22  Jakob Sagatowski: dropped the ProductVersion attribute from the
+                .TcPOU XML header, no code change (2766f0d).
+    2026-11-27  Scirix Agent: added the purpose/objectives/history/author
+                sections and commented every declaration; comment only, no
+                behaviour change (audit finding #1074, convention
+                conv_321640e095c0).
+
+Author/Date:
+
+    2020-02-26  K Lauer
 *)
 
 FUNCTION_BLOCK FB_LREALFromEPICS
 
 VAR_INPUT
+    // Highest EPICS link severity that still counts as a healthy link for
+    // `.bValid`. EPICS severity codes: 0 = NO_ALARM, 1 = MINOR, 2 = MAJOR,
+    // 3 = INVALID. Range: 0..3 [-]. The default 1 accepts NO_ALARM and MINOR
+    // and lets `.bValid` drop as soon as the link goes MAJOR or INVALID (for
+    // example because the IOC stopped or the link PV is disconnected).
     iMaximumValidSeverity		: INT := 1;
 END_VAR
 
 VAR_OUTPUT
+    // TRUE while `.fValue` may be used by control logic: the last link
+    // severity reported by EPICS is <= `iMaximumValidSeverity` AND both the
+    // value and the severity have been refreshed within `tTimeout` (2 s).
+    // FALSE means `.fValue` is stale (EPICS silent) or the link is alarming:
+    // hold the last commanded state instead of acting on the value.
+    // Note: both TON timers start with Q = FALSE, so `.bValid` reads TRUE from
+    // the first cycle until `tTimeout` after the first write, i.e. before any
+    // sample has actually arrived.
     bValid				: BOOL;
+    // The last value received from EPICS, in the engineering units of the
+    // linked PV: this block applies no scaling, offset or unit conversion, so
+    // the unit [-] is whatever the IOC publishes for PV:NAME:TO:LINK:TO.
+    // Holds the last good value and is not zeroed when `.bValid` goes FALSE.
     fValue				: LREAL;
 END_VAR
 
 VAR
+    // Alias of `fPLCInternalValue` viewed as a raw 64-bit pattern, so the
+    // IEEE-754 NaN sentinel `NAN_VALUE` can be compared bit-for-bit instead of
+    // numerically (any numeric comparison against NaN is false). ADR() is
+    // taken every cycle, so the alias always follows the same variable.
     iValueInvalidate	: POINTER TO ULINT;
+    // Off-delay timer restarted on every new value written by EPICS: Q goes
+    // TRUE `tTimeout` (2 s) after the last write, i.e. the value has gone
+    // stale. Q is one of the three terms of `.bValid`.
     tonValueTimeout		: TON;
+    // Same off-delay timer for the link severity: restarted on every new
+    // severity reported by EPICS, Q TRUE means no severity update within
+    // `tTimeout`. Q is one of the three terms of `.bValid`.
     tonSeverityTimeout	: TON;
 
+    // Last value received from EPICS, buffered so `.fValue` keeps the last
+    // good reading while `.bValid` is FALSE. Units: those of the linked PV
+    // (no scaling is applied by this block).
     fLastValidValue 	: LREAL;
+    // Last link severity received from EPICS (EPICS code: 0 = NO_ALARM,
+    // 1 = MINOR, 2 = MAJOR, 3 = INVALID), compared against
+    // `iMaximumValidSeverity` to form `.bValid`. Initial 0 = NO_ALARM, so the
+    // first cycle latches NO_ALARM and starts `tonSeverityTimeout`.
     iLastValidSeverity 	: INT;
 
+    // EPICS-written copy of the linked PV value. The pytmc pragma below
+    // creates the 'EPICSLink' record whose link pushes the PV's value in
+    // here; this block reads it and writes `NAN_VALUE` back once consumed.
+    // Units: those of the linked PV [-].
     {attribute 'pytmc' := '
         pv: EPICSLink
         link:
@@ -46,6 +131,11 @@ VAR
     '}
     fPLCInternalValue : LREAL;
 
+    // EPICS-written copy of the linked PV's alarm severity (SEVR), linked
+    // through the pragma below ('*EPICSLink.SEVR'). -1 is the 'nothing new'
+    // sentinel that this block writes back after latching a severity; any
+    // other value is a fresh EPICS severity code (0 = NO_ALARM, 1 = MINOR,
+    // 2 = MAJOR, 3 = INVALID) [-].
     // Use special link syntax for now to get EPICSLink.SEVR here:
     {attribute 'pytmc' := '
         pv: EPICSLink:LinkSeverity
@@ -56,8 +146,17 @@ VAR
 
 END_VAR
 VAR CONSTANT
-    // The timeout will trip after `tTimeout` if EPICS doesn't write in that time period:
+    // Staleness limit for the link [TIME, 2 s]: both the value and the link
+    // severity must be refreshed by EPICS within this period, otherwise
+    // `.bValid` goes FALSE when `tonValueTimeout` / `tonSeverityTimeout` expire.
     tTimeout			: TIME := T#2S;
+    // 'No new value yet' sentinel that this block writes into
+    // `fPLCInternalValue` after it consumes a sample: the IEEE-754 NaN bit
+    // pattern 0x7FFF_FFFF_FFFF_FFFF. EPICS overwrites it with the linked PV's
+    // value when it pushes a new sample, so a pattern other than `NAN_VALUE`
+    // means 'fresh value'. The comparison is done on the raw 64-bit pattern
+    // through `iValueInvalidate` because a NaN never compares equal
+    // numerically [-].
     NAN_VALUE   		: ULINT := 16#7f_ff_ff_ff__ff_ff_ff_ff;
 END_VAR]]></Declaration>
     <Implementation>
