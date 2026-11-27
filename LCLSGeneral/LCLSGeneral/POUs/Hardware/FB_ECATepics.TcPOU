@@ -1,7 +1,23 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1">
   <POU Name="FB_ECATepics" Id="{38ed9c12-1d10-4e74-8cdb-42be0630d47c}" SpecialFunc="None">
-    <Declaration><![CDATA[FUNCTION_BLOCK FB_ECATepics
+    <Declaration><![CDATA[(*
+    FB_ECATepics - request and monitor the EtherCAT state of one terminal and publish it to EPICS
+
+    Usage: wire sNetId/nSlaveAddr to the terminal, select the target state in eReqState and pulse
+    bCmdReqState. The observed state, the error flag and the last ADS error text are published
+    through eDevState, bDevError and sErrorMessage.
+
+    Objectives:
+    * Poll the terminal state every 500 ms and publish the EtherCAT state machine state.
+    * Translate the ADS error id of a failed state change into readable text.
+    * Report errors and state transitions through the shared logger (FB_LogMessage), so the
+      diagnostics reach the project's log consumers and not only the sErrorMessage PV.
+
+    History:
+    2026-11-27 - report errors and state transitions through the shared logger
+*)
+FUNCTION_BLOCK FB_ECATepics
 VAR_INPUT
     sNetId          : T_AmsNetId;
     nSlaveAddr      : UINT;
@@ -57,6 +73,12 @@ VAR
     fbgetSlaveState			: FB_EcGetSlaveState;
     fbgetStatusTimer : TON;
     bInit : BOOL := TRUE;
+
+    // Shared diagnostics: errors and state transitions are reported through the project logger
+    fbLogger : FB_LogMessage := (eSubsystem := E_Subsystem.FIELDBUS); // Common logger, emits under the Fieldbus subsystem
+    rtDevError : R_TRIG; // Rising edge of bDevError: report the error once
+    ePrevDevState : E_ECAT_STATES; // Device state seen on the previous cycle, for transition events
+    sLogMessage : T_MaxString; // Scratch text handed to the logger
 
 END_VAR
 ]]></Declaration>
@@ -166,11 +188,83 @@ CASE fbsetSlaveState.nErrId OF
     sErrorMessage := 'Unknown ADS error code.';
 END_CASE
 
+(* Diagnostics ----------------------------------------------------------------------------------
+   Report the diagnostics through the shared logger (FB_LogMessage) as well, so they reach the
+   project's log consumers and not only the sErrorMessage PV. Only transitions are logged: the
+   circuit breaker in FB_LogMessage must not be tripped by per-cycle chatter.
+*)
+rtDevError(CLK := bDevError);
+
+IF rtDevError.Q THEN
+    sLogMessage := CONCAT('EtherCAT slave ', TO_STRING(nSlaveAddr));
+    sLogMessage := CONCAT(sLogMessage, ': state change to ');
+    sLogMessage := CONCAT(sLogMessage, M_StateName(eReqState));
+    sLogMessage := CONCAT(sLogMessage, ' failed, ADS error ');
+    sLogMessage := CONCAT(sLogMessage, TO_STRING(fbsetSlaveState.nErrId));
+    sLogMessage := CONCAT(sLogMessage, ': ');
+    sLogMessage := CONCAT(sLogMessage, sErrorMessage);
+    fbLogger(sMsg := sLogMessage, eSevr := TcEventSeverity.Error);
+END_IF
+
+IF eReqState <> ePrevReqState THEN
+    ePrevReqState := eReqState;
+    sLogMessage := CONCAT('EtherCAT slave ', TO_STRING(nSlaveAddr));
+    sLogMessage := CONCAT(sLogMessage, ': state change requested: ');
+    sLogMessage := CONCAT(sLogMessage, M_StateName(eReqState));
+    fbLogger(sMsg := sLogMessage, eSevr := TcEventSeverity.Info);
+END_IF
+
+IF eDevState <> ePrevDevState THEN
+    sLogMessage := CONCAT('EtherCAT slave ', TO_STRING(nSlaveAddr));
+    sLogMessage := CONCAT(sLogMessage, ': state ');
+    sLogMessage := CONCAT(sLogMessage, M_StateName(ePrevDevState));
+    sLogMessage := CONCAT(sLogMessage, ' -> ');
+    sLogMessage := CONCAT(sLogMessage, M_StateName(eDevState));
+    IF eDevState = E_ECAT_STATES.ERROR THEN
+        fbLogger(sMsg := sLogMessage, eSevr := TcEventSeverity.Error);
+    ELSE
+        fbLogger(sMsg := sLogMessage, eSevr := TcEventSeverity.Info);
+    END_IF
+    ePrevDevState := eDevState;
+END_IF
+
 IF fbgetStatusTimer.Q THEN
      fbgetStatusTimer.IN := FALSE; // reset timer
 ELSE
     fbgetStatusTimer.IN := TRUE; // reset timer
 END_IF]]></ST>
     </Implementation>
+
+    <Method Name="M_StateName" Id="{77a47710-ef47-4916-8757-7802fdb29385}">
+      <Declaration><![CDATA[(* Returns the readable EtherCAT state name of an E_ECAT_STATES value, used for the
+   state-transition messages sent to the shared logger.
+
+   History:
+   2026-11-27 - added together with the shared-logger diagnostics of FB_ECATepics
+*)
+METHOD M_StateName : T_MaxString
+VAR_INPUT
+    eState : E_ECAT_STATES; // EtherCAT state to render as text
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[CASE eState OF
+    E_ECAT_STATES.INIT:
+        M_StateName := 'INIT';
+    E_ECAT_STATES.PREOP:
+        M_StateName := 'PREOP';
+    E_ECAT_STATES.BOOTSTRAP:
+        M_StateName := 'BOOTSTRAP';
+    E_ECAT_STATES.SAFEOP:
+        M_StateName := 'SAFEOP';
+    E_ECAT_STATES.OP:
+        M_StateName := 'OP';
+    E_ECAT_STATES.ERROR:
+        M_StateName := 'ERROR';
+    ELSE
+        M_StateName := 'UNKNOWN';
+END_CASE]]></ST>
+      </Implementation>
+    </Method>
   </POU>
 </TcPlcObject>
