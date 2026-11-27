@@ -8,8 +8,8 @@ STRUCT
     {attribute 'naming' := 'omit'}
     //Incrementer, included here to facilitate using asResults
     resultIdx	:	FB_Index := (
-        LowerLimit := 1,
-        UpperLimit := 20
+        i_nLowerLimit := 1,
+        i_nUpperLimit := 20
     );
     {attribute 'naming' := 'omit'}
     fString	:	FB_FormatString; //Use to create good log messages, similar to C++ fstring

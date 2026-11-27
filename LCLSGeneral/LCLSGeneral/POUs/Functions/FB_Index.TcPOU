@@ -11,25 +11,23 @@ Use this thing to have a simple indexer with rollover.
 *)
 FUNCTION_BLOCK FB_Index
 VAR_INPUT
-    {attribute 'naming' := 'off'}
-    LowerLimit : INT := 1; //Incrementer will rollver over to this value (and initialize to this value)
-    ValInc : INT := 1; //Incrementer increments by this value
-    UpperLimit	:	INT := 1; //Incrementer will rollover at this value to lower limit
-    {attribute 'naming' := 'off'}
+    i_nLowerLimit : INT := 1; //Incrementer will rollver over to this value (and initialize to this value)
+    i_nValInc : INT := 1; //Incrementer increments by this value
+    i_nUpperLimit	:	INT := 1; //Incrementer will rollover at this value to lower limit
 END_VAR
 VAR_OUTPUT
 
 END_VAR
 VAR
-    nVal	:	INT := LowerLimit; //Internal incrementer value, initialized to LowerLimit
+    nVal	:	INT := i_nLowerLimit; //Internal incrementer value, initialized to i_nLowerLimit
 END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[{analysis -2} //Only the methods and actions are needed]]></ST>
     </Implementation>
     <Action Name="Dec" Id="{b1b81818-0c2b-42cc-90f3-55cd7cad3e87}">
       <Implementation>
-        <ST><![CDATA[nVal := nVal - ValInc;
-IF nVal < LowerLimit THEN nVal := UpperLimit; END_IF]]></ST>
+        <ST><![CDATA[nVal := nVal - i_nValInc;
+IF nVal < i_nLowerLimit THEN nVal := i_nUpperLimit; END_IF]]></ST>
       </Implementation>
     </Action>
     <Method Name="DecVal" Id="{cf4e17a1-86cd-4a59-ad6f-fc3838ffede5}">
@@ -45,9 +43,9 @@ DecVal := nVal;]]></ST>
     </Method>
     <Action Name="Inc" Id="{a11e830b-c881-456f-af74-5a750bccfd58}">
       <Implementation>
-        <ST><![CDATA[// Dont use this, use ValInc
-nVal := nVal + ValInc;
-IF nVal >  UpperLimit THEN nVal := LowerLimit; END_IF]]></ST>
+        <ST><![CDATA[// Dont use this, use i_nValInc
+nVal := nVal + i_nValInc;
+IF nVal >  i_nUpperLimit THEN nVal := i_nLowerLimit; END_IF]]></ST>
       </Implementation>
     </Action>
     <Method Name="IncVal" Id="{6f28d89a-7191-4dad-8824-c5fe9fb32dd9}">
