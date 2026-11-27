@@ -1,23 +1,109 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1">
   <DUT Name="ST_SlaveState" Id="{95acdbd0-e32f-4597-b051-9455dffeea2c}">
-    <Declaration><![CDATA[TYPE ST_SlaveState :
-STRUCT
-    (* slave state *)
-    eEcState 		: E_EcCommState;
-    nReserved		: UINT;
-    bError			: BOOL;
-    bInvalidVPRS	: BOOL;
-    nReserved2		: UINT;
+    <Declaration><![CDATA[(*
+    ST_SlaveState - one EtherCAT slave's decoded state and link flags.
 
-    (* link state *)
+    PURPOSE
+        Carries a single slave's EtherCAT state machine state and its link
+        status as named BOOLs, so diagnostic consumers do not have to mask
+        bits out of the two raw words FB_EcGetAllSlaveStates returns
+        (ST_EcSlaveState.deviceState and ST_EcSlaveState.linkState). It is
+        embedded in ST_SlaveStateInfo.stState, the per-slave record the
+        EtherCAT diagnostic publishes.
+
+    USAGE
+        Written by FB_EtherCATDiag (action M_GetSlaveStates) once per
+        diagnostic pass, one member per source bit, for example:
+
+            arrSlaveInfo[I].stState.eEcState :=
+                arrSlaveStates[I].deviceState AND 16#0F;
+            arrSlaveInfo[I].stState.bError :=
+                arrSlaveStates[I].deviceState.4;
+
+        Read it through the VAR_IN_OUT array FB_EtherCATDiag publishes
+        (arrDiagSlaveInfo[..].stState, also surfaced by FB_EcatDiagWrapper),
+        or read the JSON FB_EtherCATDiag writes with its DiagnosticJson
+        action (object key "stState") into the logger payload. The members
+        are derived status: nothing outside FB_EtherCATDiag writes them.
+
+    OBJECTIVES
+        - Give every bit of the raw state and link words a name, so
+          bInvalidVPRS, bMissingLink and bUnexpectedLink can be read without
+          the EtherCAT ESC register map at hand.
+        - Keep the split faithful to the raw bit layout - each member below
+          names the word and bit it comes from - so a field can always be
+          traced back to the slave's raw status.
+        - Keep the two reserved UINTs, so the struct layout, the diagnostic
+          JSON key set and the generated .tmc stay stable.
+
+    HISTORY
+        2020-03-13 / Alex Wallace
+            DUT created with the first version of the EtherCAT diagnostic
+            example (FB_EtherCATDiag).
+        2021-11-02 / K Lauer
+            Style only: leading tabs replaced by spaces by pre-commit, no
+            content change.
+        2023-05-22 / Jakob Sagatowski
+            TcPlcObject re-saved after the "Write product version in files"
+            flag was removed; declaration unchanged.
+        2026-11-27 / Scirix Agent
+            Added this header and a comment on every member; documentation
+            only, no behaviour, layout or bit mapping change (convention
+            conv_321640e095c0).
+
+    NOTE
+        A set bit is a report from the slave, not a PLC verdict. No member is
+        latched here: each value follows the last diagnostic pass and keeps
+        its old content until the next pass overwrites it. Slots with no
+        slave are zeroed by FB_EtherCATDiag, so all members read FALSE / 0.
+*)
+TYPE ST_SlaveState :
+STRUCT
+    (* EtherCAT state machine state of the slave: raw deviceState word AND
+       16#0F (E_EcCommState). 0 = UNDEFINED, 1 = INIT, 2 = PREOP,
+       3 = BOOT, 4 = SAFEOP, 8 = OP; 8 (OP) is the only healthy value.
+       No units. *)
+    eEcState 		: E_EcCommState;
+    (* Reserved placeholder, UINT, no units. Not written by FB_EtherCATDiag,
+       so it reads 0; it keeps the split aligned with the raw 16-bit
+       deviceState word and the JSON key set stable. *)
+    nReserved		: UINT;
+    (* Raw deviceState bit 4 (16#0010): the slave reports an error
+       condition. No units. *)
+    bError			: BOOL;
+    (* Raw deviceState bit 5 (16#0020): the slave reports its
+       Vendor/Product/Revision/Serial identification ("VPRS") as invalid.
+       No units. *)
+    bInvalidVPRS	: BOOL;
+    (* Second reserved placeholder of the state word, UINT, no units. Not
+       written by FB_EtherCATDiag, so it reads 0; kept for layout and JSON
+       key stability. *)
+    nReserved2		: UINT;
+    (* Raw linkState bit 0 (16#01): the master has no communication with
+       this slave. No units. *)
     bNoCommToSlave	: BOOL;
+    (* Raw linkState bit 1 (16#02): the slave reports a link error.
+       No units. *)
     bLinkError		: BOOL;
+    (* Raw linkState bit 2 (16#04): a link the configuration expects is
+       missing. No units. *)
     bMissingLink	: BOOL;
+    (* Raw linkState bit 3 (16#08): a link the configuration does not
+       expect is present. No units. *)
     bUnexpectedLink	: BOOL;
+    (* Raw linkState bit 4 (16#10): per-port link bit for port A of this
+       slave, passed through unmodified and reported only - no logic in this
+       library evaluates it. No units. *)
     bPortA			: BOOL;
+    (* Raw linkState bit 5 (16#20): per-port link bit for port B, see
+       bPortA. No units. *)
     bPortB			: BOOL;
+    (* Raw linkState bit 6 (16#40): per-port link bit for port C, see
+       bPortA. No units. *)
     bPortC			: BOOL;
+    (* Raw linkState bit 7 (16#80): per-port link bit for port D, see
+       bPortA. No units. *)
     bPortD			: BOOL;
 END_STRUCT
 END_TYPE]]></Declaration>
