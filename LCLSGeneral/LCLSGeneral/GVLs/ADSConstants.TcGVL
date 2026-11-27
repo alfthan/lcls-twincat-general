@@ -1,0 +1,79 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <GVL Name="ADSConstants" Id="{015ab655-e16c-4031-8459-8c4d0ae2bd2d}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'analysis' := '-33'}
+(*
+    Global ADS error-code constants
+
+    Single source of truth for the ADS error codes that the LCLS General
+    library translates into human-readable messages. The names and values
+    mirror the Beckhoff ADS error-code tables, so logic refers to
+    ADSConstants.ADSERR_DEVICE_ERROR instead of writing the literal 1792
+    wherever the code is used.
+
+    Author: PLC Scirix agent (task #94)   Date: 2026-11-27
+*)
+VAR_GLOBAL CONSTANT
+    // --- Device errors (0x700 - 0x739) ---
+    ADSERR_DEVICE_ERROR : UDINT := 1792; // General device error.
+    ADSERR_DEVICE_SRVNOTSUPP : UDINT := 1793; // Service is not supported by the server.
+    ADSERR_DEVICE_INVALIDGRP : UDINT := 1794; // Invalid index group.
+    ADSERR_DEVICE_INVALIDOFFSET : UDINT := 1795; // Invalid index offset.
+    ADSERR_DEVICE_INVALIDACCESS : UDINT := 1796; // Reading or writing not permitted.
+    ADSERR_DEVICE_INVALIDSIZE : UDINT := 1797; // Parameter size not correct.
+    ADSERR_DEVICE_INVALIDDATA : UDINT := 1798; // Invalid data values.
+    ADSERR_DEVICE_NOTREADY : UDINT := 1799; // Device is not ready to operate.
+    ADSERR_DEVICE_BUSY : UDINT := 1800; // Device is busy.
+    ADSERR_DEVICE_INVALIDCONTEXT : UDINT := 1801; // Invalid operating system context.
+    ADSERR_DEVICE_NOMEMORY : UDINT := 1802; // Insufficient memory.
+    ADSERR_DEVICE_INVALIDPARM : UDINT := 1803; // Invalid parameter values.
+    ADSERR_DEVICE_NOTFOUND : UDINT := 1804; // Not found (files, ...).
+    ADSERR_DEVICE_SYNTAX : UDINT := 1805; // Syntax error in file or command.
+    ADSERR_DEVICE_INCOMPATIBLE : UDINT := 1806; // Objects do not match.
+    ADSERR_DEVICE_EXISTS : UDINT := 1807; // Object already exists.
+    ADSERR_DEVICE_SYMBOLNOTFOUND : UDINT := 1808; // Symbol not found.
+    ADSERR_DEVICE_SYMBOLVERSIONINVALID : UDINT := 1809; // Invalid symbol version. This can occur due to an online change. Create a new handle.
+    ADSERR_DEVICE_INVALIDSTATE : UDINT := 1810; // Device (server) is in invalid state.
+    ADSERR_DEVICE_TRANSMODENOTSUPP : UDINT := 1811; // AdsTransMode not supported.
+    ADSERR_DEVICE_NOTIFYHNDINVALID : UDINT := 1812; // Notification handle is invalid.
+    ADSERR_DEVICE_CLIENTUNKNOWN : UDINT := 1813; // Notification client not registered.
+    ADSERR_DEVICE_NOMOREHDLS : UDINT := 1814; // No further handle available.
+    ADSERR_DEVICE_INVALIDWATCHSIZE : UDINT := 1815; // Notification size too large.
+    ADSERR_DEVICE_NOTINIT : UDINT := 1816; // Device not initialized.
+    ADSERR_DEVICE_TIMEOUT : UDINT := 1817; // Device has a timeout.
+    ADSERR_DEVICE_NOINTERFACE : UDINT := 1818; // Interface query failed.
+    ADSERR_DEVICE_INVALIDINTERFACE : UDINT := 1819; // Wrong interface requested.
+    ADSERR_DEVICE_INVALIDCLSID : UDINT := 1820; // Class ID is invalid.
+    ADSERR_DEVICE_INVALIDOBJID : UDINT := 1821; // Object ID is invalid.
+    ADSERR_DEVICE_PENDING : UDINT := 1822; // Request pending.
+    ADSERR_DEVICE_ABORTED : UDINT := 1823; // Request is aborted.
+    ADSERR_DEVICE_WARNING : UDINT := 1824; // Signal warning.
+    ADSERR_DEVICE_INVALIDARRAYIDX : UDINT := 1825; // Invalid array index.
+    ADSERR_DEVICE_SYMBOLNOTACTIVE : UDINT := 1826; // Symbol not active.
+    ADSERR_DEVICE_ACCESSDENIED : UDINT := 1827; // Access denied.
+    ADSERR_DEVICE_LICENSENOTFOUND : UDINT := 1828; // Missing license.
+    ADSERR_DEVICE_LICENSEEXPIRED : UDINT := 1829; // License expired.
+    ADSERR_DEVICE_LICENSEEXCEEDED : UDINT := 1830; // License exceeded.
+    ADSERR_DEVICE_LICENSEINVALID : UDINT := 1831; // Invalid license.
+    ADSERR_DEVICE_LICENSESYSTEMID : UDINT := 1832; // License problem: System ID is invalid.
+    ADSERR_DEVICE_LICENSENOTIMELIMIT : UDINT := 1833; // License not limited in time.
+    ADSERR_DEVICE_LICENSEFUTUREISSUE : UDINT := 1834; // Licensing problem: time in the future.
+    ADSERR_DEVICE_LICENSETIMETOLONG : UDINT := 1835; // License period too long.
+    ADSERR_DEVICE_EXCEPTION : UDINT := 1836; // Exception at system startup.
+    ADSERR_DEVICE_LICENSEDUPLICATED : UDINT := 1837; // License file read twice.
+    ADSERR_DEVICE_SIGNATUREINVALID : UDINT := 1838; // Invalid signature.
+    ADSERR_DEVICE_CERTIFICATEINVALID : UDINT := 1839; // Invalid certificate.
+    ADSERR_DEVICE_LICENSEOEMNOTFOUND : UDINT := 1840; // Public key not known from OEM.
+    ADSERR_DEVICE_LICENSERESTRICTED : UDINT := 1841; // License not valid for this system ID.
+    ADSERR_DEVICE_LICENSEDEMODENIED : UDINT := 1842; // Demo license prohibited.
+    ADSERR_DEVICE_INVALIDFNCID : UDINT := 1843; // Invalid function ID.
+    ADSERR_DEVICE_OUTOFRANGE : UDINT := 1844; // Outside the valid range.
+    ADSERR_DEVICE_INVALIDALIGNMENT : UDINT := 1845; // Invalid alignment.
+    ADSERR_DEVICE_LICENSEPLATFORM : UDINT := 1846; // Invalid platform level.
+    ADSERR_DEVICE_FORWARD_PL : UDINT := 1847; // Context - forward to passive level.
+    ADSERR_DEVICE_FORWARD_DL : UDINT := 1848; // Context - forward to dispatch level.
+    ADSERR_DEVICE_FORWARD_RT : UDINT := 1849; // Context - forward to real-time.
+END_VAR]]></Declaration>
+  </GVL>
+</TcPlcObject>
