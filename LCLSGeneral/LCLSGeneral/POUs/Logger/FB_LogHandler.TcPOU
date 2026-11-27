@@ -61,7 +61,7 @@ VAR
 
     nI					:	UINT;
 
-    SocketEnable : BOOL;
+    bSocketEnable : BOOL;
 
     ctuSocketError : CTU := (PV:=3); // Circuit breaker for socket errors. 3 errors before it stops.
 
@@ -113,10 +113,10 @@ END_IF
 
 // Disable fbSocket if too many errors occur
 ctuSocketError(CU:=fbSocket.bError, RESET:=tRetryConnection.Q OR rtReset.Q);
-SocketEnable R= ctuSocketError.Q;
+bSocketEnable R= ctuSocketError.Q;
 // Retry an hour later
 tRetryConnection(IN:=ctuSocketError.Q);
-SocketEnable S= tRetryConnection.Q OR rtReset.Q;
+bSocketEnable S= tRetryConnection.Q OR rtReset.Q;
 
 fbSocket(
     nLocalPort:=0,
