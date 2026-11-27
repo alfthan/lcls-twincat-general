@@ -10,20 +10,31 @@
     1. A partial buffer that we will slowly fill one value at a time
     2. An output buffer that will only update when the partial buffer is full
 
-    Take great care of the following, or else your program will likely crash,
-    or at least have corrupt data:
+    Take great care of the following:
     1. The input type and array types must match
     2. The provided element count must be accurate and match both arrays
     3. The provided element size is correct
 
-    As this function block as no way of checking that you did this correctly.
+    The supplied addresses and sizes are validated on every cycle before any
+    MEMCPY runs: a zero (NULL or unwired) address, an element size of zero or
+    above GeneralConstants.MAX_DATA_BUFFER_ELEMENT_SIZE, or an element count of
+    zero or above GeneralConstants.MAX_DATA_BUFFER_ELEMENT_COUNT is rejected and
+    latched in bError. While bError is set nothing is copied, so a bad
+    configuration can no longer write outside the caller's buffers or fault the
+    PLC. Fix the inputs and pulse bReset to clear bError.
+
+    2026-11-27: added the pre-use address/size validation gate plus the
+                 bError/bReset rejection path (audit finding: validate
+                 caller-supplied buffer pointers and counts before use).
 *)
 VAR_INPUT
     // Whether or not to accumulate on this cycle
     bExecute: BOOL;
+    // Clears the latched parameter error. Only honoured while the inputs are valid.
+    bReset: BOOL;
     // Address of the value to accumulate
     pInputAdr: PVOID;
-    // Size of the accumulated value
+    // Size of the accumulated value in bytes
     iInputSize: UDINT;
     // Number of values in the output array
     iElemCount: UDINT;
@@ -35,13 +46,45 @@ END_VAR
 VAR_OUTPUT
     // Set to TRUE on the cycle that we copy the output array
     bNewArray: BOOL;
+    // Latched TRUE while the supplied addresses or sizes are rejected. Nothing is
+    // accumulated while this is set; clear it with bReset once the inputs are valid.
+    bError: BOOL;
 END_VAR
 VAR
     iArrayIndex: UDINT := 0;
+    // Result of the pre-use validation of the caller-supplied addresses and sizes
+    bParamsValid: BOOL;
 END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[bNewArray := FALSE;
-IF bExecute THEN
+
+// Pre-use validation gate: a raw address cannot be dereference-checked, so refuse
+// a zero (NULL or unwired) address and any element count or element size that is
+// zero or above the configured limits before any MEMCPY source or destination is
+// used. This is what keeps a bad configuration from corrupting memory.
+bParamsValid := (iInputSize > 0)
+    AND (iInputSize <= GeneralConstants.MAX_DATA_BUFFER_ELEMENT_SIZE)
+    AND (iElemCount > 0)
+    AND (iElemCount <= GeneralConstants.MAX_DATA_BUFFER_ELEMENT_COUNT)
+    AND (pInputAdr <> 0)
+    AND (pPartialAdr <> 0)
+    AND (pOutputAdr <> 0);
+
+// Latch the rejection and exit early: nothing is accumulated until it is
+// acknowledged, and bReset is only honoured once the inputs are valid again.
+IF NOT bParamsValid THEN
+    bError := TRUE;
+ELSIF bReset THEN
+    bError := FALSE;
+END_IF
+
+// Keep the rolling index inside the validated element range in case the caller
+// changed the element count since the previous cycle
+IF iArrayIndex >= iElemCount THEN
+    iArrayIndex := 0;
+END_IF
+
+IF bExecute AND bParamsValid AND NOT bError THEN
     MEMCPY(
         destAddr := pPartialAdr + iArrayIndex*iInputSize,
         srcAddr := pInputAdr,

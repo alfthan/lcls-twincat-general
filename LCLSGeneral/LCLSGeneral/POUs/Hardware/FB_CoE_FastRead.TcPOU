@@ -8,10 +8,23 @@
 
     In practice, it's impossible to read most CoE parameters every cycle,
     but this is a best effort and will work if the data is available
+
+    The caller-supplied destination buffer is validated before the first read is
+    started: a zero (NULL or unwired) address, or a buffer length of zero or above
+    GeneralConstants.MAX_COE_READ_BYTES, is rejected and latched in bError. While
+    bError is set no CoE read is started, so the drive can never write through an
+    invalid pointer or past the end of the caller's buffer. Fix the inputs and
+    pulse bReset to clear bError.
+
+    2026-11-27: added the pre-use address/length validation gate plus the
+                 bError/bReset rejection path (audit finding: validate
+                 caller-supplied buffer pointers and lengths before use).
 *)
 VAR_INPUT
     // If TRUE we'll attempt a CoE read this cycle.
     bExecute: BOOL;
+    // Clears the latched parameter error. Only honoured while the inputs are valid.
+    bReset: BOOL;
     // Link this to your terminal's drive reference variables under InfoData.
     stPlcDriveRef AT %I*: ST_PlcDriveRef;
     // Hexadecimal index of CoE, e.g. the 8010 in 8010:12
@@ -26,14 +39,18 @@ END_VAR
 VAR_OUTPUT
     // TRUE if the value was updated on this cycle.
     bNewValue: BOOL;
+    // Latched TRUE while pDstBuf or cbBufLen is rejected. No read is started while
+    // this is set; clear it with bReset once the inputs are valid.
+    bError: BOOL;
 END_VAR
 VAR
     fbRead: FB_CoERead_ByDriveRef;
     stDriveRef: ST_DriveRef;
     iLoop: INT;
     bInnerExec: BOOL;
-END_VAR
-]]></Declaration>
+    // Result of the pre-use validation of the caller-supplied destination buffer
+    bParamsValid: BOOL;
+END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[stDriveRef.sNetId := F_CreateAmsNetId(stPlcDriveRef.aNetId);
 stDriveRef.nSlaveAddr := stPlcDriveRef.nSlaveAddr;
@@ -41,7 +58,24 @@ stDriveRef.nDriveNo := stPlcDriveRef.nDriveNo;
 stDriveRef.nDriveType := stPlcDriveRef.nDriveType;
 
 bNewValue := FALSE;
-IF bExecute THEN
+
+// Pre-use validation gate: refuse a zero (NULL or unwired) destination address or
+// a buffer length of zero or above the configured maximum before the CoE read is
+// started, so the read can never write through an invalid pointer or past the end
+// of the caller's buffer.
+bParamsValid := (pDstBuf <> 0)
+    AND (cbBufLen > 0)
+    AND (cbBufLen <= GeneralConstants.MAX_COE_READ_BYTES);
+
+// Latch the rejection and exit early: no read is started until it is
+// acknowledged, and bReset is only honoured once the inputs are valid again.
+IF NOT bParamsValid THEN
+    bError := TRUE;
+ELSIF bReset THEN
+    bError := FALSE;
+END_IF
+
+IF bExecute AND bParamsValid AND NOT bError THEN
     // You need to do this block 3 times per cycle to have a chance at always getting a read
     FOR iLoop:= 1 TO 3 DO
         fbRead(

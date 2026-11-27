@@ -8,6 +8,9 @@ VAR
     fbCbTest : FB_CircuitBreaker_Test;
     {attribute 'analysis' := '-33'}
     // Data
+    fbDataBufferTest : FB_DataBuffer_Test;
+    {attribute 'analysis' := '-33'}
+    // Data
     fbCentroidTest : FB_Test_EpicsCentroidMonitor;
     {attribute 'analysis' := '-33'}
     fbMotorTest : FB_Test_EpicsMotorMonitor;

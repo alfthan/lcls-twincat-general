@@ -9,6 +9,17 @@ VAR_GLOBAL CONSTANT
     // You can make this smaller if you want to use less memory in your program in exchange for limiting your max state count
     // You can make this larger if you want to use states-based FBs sized beyond the EPICS enum limit
     MAX_STATES: UINT := 15;
+
+    // Largest element count accepted by FB_DataBuffer.
+    // Bounds the array walk so a bogus caller-supplied count cannot run a MEMCPY
+    // destination past the end of the caller's partial/output arrays.
+    MAX_DATA_BUFFER_ELEMENT_COUNT: UDINT := 10000;
+    // Largest element size in bytes accepted by FB_DataBuffer, e.g. SIZEOF of the
+    // value being accumulated. Rejects a zero or obviously wrong element size.
+    MAX_DATA_BUFFER_ELEMENT_SIZE: UDINT := 1024;
+    // Largest destination buffer length in bytes accepted by FB_CoE_FastRead.
+    // Rejects a zero or oversized cbBufLen before a CoE read is started.
+    MAX_COE_READ_BYTES: UINT := 1024;
 END_VAR
 ]]></Declaration>
   </GVL>

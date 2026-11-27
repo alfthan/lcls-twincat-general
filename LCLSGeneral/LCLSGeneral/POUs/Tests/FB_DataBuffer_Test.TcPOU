@@ -1,0 +1,377 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_DataBuffer_Test" Id="{123F1E58-1585-488F-B7A3-91A7AFE78D67}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_DataBuffer_Test EXTENDS TcUnit.FB_TestSuite
+(*
+    Unit tests for FB_DataBuffer.
+
+    Covers the pre-use validation gate on the caller-supplied addresses and
+    sizes: a NULL (unwired) address, a zero or oversized element count and a
+    zero or oversized element size must be rejected with bError set and no
+    MEMCPY executed, and the latched error must only clear on bReset once the
+    inputs are valid again.
+
+    2026-11-27: created together with the validation gate in FB_DataBuffer
+                 (audit finding: validate caller-supplied buffer pointers and
+                 counts before use).
+*)
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[TestValidParametersExpectNewArray();
+TestNullPartialAddressExpectError();
+TestZeroElemCountExpectError();
+TestOversizedElemCountExpectError();
+TestZeroElemSizeExpectError();
+TestResetClearsErrorAfterFix();]]></ST>
+    </Implementation>
+    <Method Name="TestValidParametersExpectNewArray" Id="{35DE64CB-0D22-4613-BAAE-A6566907369F}">
+      <Declaration><![CDATA[METHOD TestValidParametersExpectNewArray
+VAR
+    // Block under test
+    fbDataBuffer: FB_DataBuffer;
+    // Rolling buffer filled one element per cycle
+    arrPartial: ARRAY [1..4] OF INT;
+    // Buffer that is only written when the rolling buffer is full
+    arrOutput: ARRAY [1..4] OF INT;
+    // Value to accumulate
+    nInput: INT;
+    // Current element
+    nIndex: INT;
+    // Whether the output buffer was copied on the last cycle
+    bNewArray: BOOL;
+    // Whether the supplied parameters were rejected
+    bError: BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[TEST('TestValidParametersExpectNewArray');
+
+FOR nIndex := 1 TO 4 DO
+    nInput := nIndex;
+    fbDataBuffer(
+        bExecute := TRUE,
+        pInputAdr := ADR(nInput),
+        iInputSize := SIZEOF(nInput),
+        iElemCount := 4,
+        pPartialAdr := ADR(arrPartial),
+        pOutputAdr := ADR(arrOutput),
+        bNewArray => bNewArray,
+        bError => bError);
+END_FOR
+
+AssertEquals_BOOL(Expected := FALSE,
+    Actual := bError,
+    Message := 'Valid addresses and sizes must not raise bError');
+
+AssertEquals_BOOL(Expected := TRUE,
+    Actual := bNewArray,
+    Message := 'The last accumulated value must copy the partial buffer to the output buffer');
+
+FOR nIndex := 1 TO 4 DO
+    AssertEquals_INT(Expected := nIndex,
+        Actual := arrOutput[nIndex],
+        Message := 'The output buffer must hold the accumulated values in order');
+END_FOR
+
+TEST_FINISHED();]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="TestNullPartialAddressExpectError" Id="{54FE6878-DA41-409A-8C00-1FAB852749E1}">
+      <Declaration><![CDATA[METHOD TestNullPartialAddressExpectError
+VAR
+    // Block under test
+    fbDataBuffer: FB_DataBuffer;
+    // Rolling buffer, deliberately left unbound
+    pNullAdr: PVOID;
+    // Buffer that must stay untouched
+    arrOutput: ARRAY [1..4] OF INT;
+    // Value to accumulate
+    nInput: INT;
+    // Current element
+    nIndex: INT;
+    // Whether the output buffer was copied on the last cycle
+    bNewArray: BOOL;
+    // Whether the supplied parameters were rejected
+    bError: BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[TEST('TestNullPartialAddressExpectError');
+
+FOR nIndex := 1 TO 4 DO
+    nInput := nIndex;
+    fbDataBuffer(
+        bExecute := TRUE,
+        pInputAdr := ADR(nInput),
+        iInputSize := SIZEOF(nInput),
+        iElemCount := 4,
+        pPartialAdr := pNullAdr,
+        pOutputAdr := ADR(arrOutput),
+        bNewArray => bNewArray,
+        bError => bError);
+END_FOR
+
+AssertEquals_BOOL(Expected := TRUE,
+    Actual := bError,
+    Message := 'A zero partial buffer address must be rejected');
+
+AssertEquals_BOOL(Expected := FALSE,
+    Actual := bNewArray,
+    Message := 'No output copy may happen while the parameters are rejected');
+
+AssertEquals_INT(Expected := 0,
+    Actual := arrOutput[1],
+    Message := 'The output buffer must not be written when the parameters are rejected');
+
+TEST_FINISHED();]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="TestZeroElemCountExpectError" Id="{764BAF80-3AF2-468E-ADD4-7671CA0B4103}">
+      <Declaration><![CDATA[METHOD TestZeroElemCountExpectError
+VAR
+    // Block under test
+    fbDataBuffer: FB_DataBuffer;
+    // Rolling buffer that must stay untouched
+    arrPartial: ARRAY [1..4] OF INT;
+    // Buffer that must stay untouched
+    arrOutput: ARRAY [1..4] OF INT;
+    // Value to accumulate
+    nInput: INT;
+    // Current element
+    nIndex: INT;
+    // Whether the output buffer was copied on the last cycle
+    bNewArray: BOOL;
+    // Whether the supplied parameters were rejected
+    bError: BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[TEST('TestZeroElemCountExpectError');
+
+FOR nIndex := 1 TO 4 DO
+    nInput := nIndex;
+    fbDataBuffer(
+        bExecute := TRUE,
+        pInputAdr := ADR(nInput),
+        iInputSize := SIZEOF(nInput),
+        iElemCount := 0,
+        pPartialAdr := ADR(arrPartial),
+        pOutputAdr := ADR(arrOutput),
+        bNewArray => bNewArray,
+        bError => bError);
+END_FOR
+
+AssertEquals_BOOL(Expected := TRUE,
+    Actual := bError,
+    Message := 'An element count of zero must be rejected');
+
+AssertEquals_BOOL(Expected := FALSE,
+    Actual := bNewArray,
+    Message := 'No output copy may happen with an element count of zero');
+
+AssertEquals_INT(Expected := 0,
+    Actual := arrPartial[1],
+    Message := 'The partial buffer must not be written when the parameters are rejected');
+
+TEST_FINISHED();]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="TestOversizedElemCountExpectError" Id="{C9198028-272A-4027-B2CE-CE16EF266C5C}">
+      <Declaration><![CDATA[METHOD TestOversizedElemCountExpectError
+VAR
+    // Block under test
+    fbDataBuffer: FB_DataBuffer;
+    // Rolling buffer that must stay untouched
+    arrPartial: ARRAY [1..4] OF INT;
+    // Buffer that must stay untouched
+    arrOutput: ARRAY [1..4] OF INT;
+    // Value to accumulate
+    nInput: INT;
+    // One element past the configured maximum
+    iOversizedCount: UDINT := GeneralConstants.MAX_DATA_BUFFER_ELEMENT_COUNT + 1;
+    // Current element
+    nIndex: INT;
+    // Whether the output buffer was copied on the last cycle
+    bNewArray: BOOL;
+    // Whether the supplied parameters were rejected
+    bError: BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[TEST('TestOversizedElemCountExpectError');
+
+FOR nIndex := 1 TO 4 DO
+    nInput := nIndex;
+    fbDataBuffer(
+        bExecute := TRUE,
+        pInputAdr := ADR(nInput),
+        iInputSize := SIZEOF(nInput),
+        iElemCount := iOversizedCount,
+        pPartialAdr := ADR(arrPartial),
+        pOutputAdr := ADR(arrOutput),
+        bNewArray => bNewArray,
+        bError => bError);
+END_FOR
+
+AssertEquals_BOOL(Expected := TRUE,
+    Actual := bError,
+    Message := 'An element count above MAX_DATA_BUFFER_ELEMENT_COUNT must be rejected');
+
+AssertEquals_BOOL(Expected := FALSE,
+    Actual := bNewArray,
+    Message := 'No output copy may happen with an oversized element count');
+
+AssertEquals_INT(Expected := 0,
+    Actual := arrPartial[1],
+    Message := 'The partial buffer must not be written when the parameters are rejected');
+
+TEST_FINISHED();]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="TestZeroElemSizeExpectError" Id="{5A4DAC02-A7AC-4A0C-85E2-5E94B4EB8504}">
+      <Declaration><![CDATA[METHOD TestZeroElemSizeExpectError
+VAR
+    // Block under test
+    fbDataBuffer: FB_DataBuffer;
+    // Rolling buffer that must stay untouched
+    arrPartial: ARRAY [1..4] OF INT;
+    // Buffer that must stay untouched
+    arrOutput: ARRAY [1..4] OF INT;
+    // Value to accumulate
+    nInput: INT;
+    // Current element
+    nIndex: INT;
+    // Whether the output buffer was copied on the last cycle
+    bNewArray: BOOL;
+    // Whether the supplied parameters were rejected
+    bError: BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[TEST('TestZeroElemSizeExpectError');
+
+FOR nIndex := 1 TO 4 DO
+    nInput := nIndex;
+    fbDataBuffer(
+        bExecute := TRUE,
+        pInputAdr := ADR(nInput),
+        iInputSize := 0,
+        iElemCount := 4,
+        pPartialAdr := ADR(arrPartial),
+        pOutputAdr := ADR(arrOutput),
+        bNewArray => bNewArray,
+        bError => bError);
+END_FOR
+
+AssertEquals_BOOL(Expected := TRUE,
+    Actual := bError,
+    Message := 'An element size of zero must be rejected');
+
+AssertEquals_BOOL(Expected := FALSE,
+    Actual := bNewArray,
+    Message := 'No output copy may happen with an element size of zero');
+
+AssertEquals_INT(Expected := 0,
+    Actual := arrPartial[1],
+    Message := 'The partial buffer must not be written when the parameters are rejected');
+
+TEST_FINISHED();]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="TestResetClearsErrorAfterFix" Id="{4217D8D7-48B4-4C2C-B2BB-2174C1B6F578}">
+      <Declaration><![CDATA[METHOD TestResetClearsErrorAfterFix
+VAR
+    // Block under test
+    fbDataBuffer: FB_DataBuffer;
+    // Rolling buffer
+    arrPartial: ARRAY [1..4] OF INT;
+    // Output buffer
+    arrOutput: ARRAY [1..4] OF INT;
+    // Deliberately unbound output buffer address
+    pNullAdr: PVOID;
+    // Value to accumulate
+    nInput: INT;
+    // Current element
+    nIndex: INT;
+    // Whether the output buffer was copied on the last cycle
+    bNewArray: BOOL;
+    // Whether the supplied parameters were rejected
+    bError: BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[TEST('TestResetClearsErrorAfterFix');
+
+// Reject first: the output buffer address is unbound
+fbDataBuffer(
+    bExecute := TRUE,
+    pInputAdr := ADR(nInput),
+    iInputSize := SIZEOF(nInput),
+    iElemCount := 4,
+    pPartialAdr := ADR(arrPartial),
+    pOutputAdr := pNullAdr,
+    bNewArray => bNewArray,
+    bError => bError);
+
+AssertEquals_BOOL(Expected := TRUE,
+    Actual := bError,
+    Message := 'A zero output buffer address must be rejected');
+
+// Dropping bExecute must not dismiss the latched error
+fbDataBuffer(
+    bExecute := FALSE,
+    pInputAdr := ADR(nInput),
+    iInputSize := SIZEOF(nInput),
+    iElemCount := 4,
+    pPartialAdr := ADR(arrPartial),
+    pOutputAdr := pNullAdr,
+    bNewArray => bNewArray,
+    bError => bError);
+
+AssertEquals_BOOL(Expected := TRUE,
+    Actual := bError,
+    Message := 'The latched error must stay set while the inputs are still invalid');
+
+// bReset with corrected inputs clears it
+fbDataBuffer(
+    bExecute := FALSE,
+    bReset := TRUE,
+    pInputAdr := ADR(nInput),
+    iInputSize := SIZEOF(nInput),
+    iElemCount := 4,
+    pPartialAdr := ADR(arrPartial),
+    pOutputAdr := ADR(arrOutput),
+    bNewArray => bNewArray,
+    bError => bError);
+
+AssertEquals_BOOL(Expected := FALSE,
+    Actual := bError,
+    Message := 'bReset must clear the latched error once the inputs are valid');
+
+// Accumulation resumes and fills the output buffer
+FOR nIndex := 1 TO 4 DO
+    nInput := nIndex;
+    fbDataBuffer(
+        bExecute := TRUE,
+        pInputAdr := ADR(nInput),
+        iInputSize := SIZEOF(nInput),
+        iElemCount := 4,
+        pPartialAdr := ADR(arrPartial),
+        pOutputAdr := ADR(arrOutput),
+        bNewArray => bNewArray,
+        bError => bError);
+END_FOR
+
+AssertEquals_BOOL(Expected := TRUE,
+    Actual := bNewArray,
+    Message := 'Accumulation must resume after the error has been cleared');
+
+AssertEquals_INT(Expected := 4,
+    Actual := arrOutput[4],
+    Message := 'The output buffer must hold the accumulated values after recovery');
+
+TEST_FINISHED();]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>

@@ -279,6 +279,9 @@
     <Compile Include="POUs\Tests\FB_CircuitBreaker_Test.TcPOU">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="POUs\Tests\FB_DataBuffer_Test.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="POUs\Tests\FB_ECATAutoRestart_Test.TcPOU">
       <SubType>Code</SubType>
     </Compile>
