@@ -3,13 +3,31 @@
   <POU Name="FB_ThermoCouple" Id="{cc00895a-0264-4382-820e-9cfa9062e545}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_ThermoCouple
 (*
+    Scales a raw temperature reading and reports whether the sensor is
+    connected.
+
+    Usage:
+        Instantiate, link iRaw/bError/bOverrange to the terminal process data
+        and read fTemp/bConnected. Set bInputsNormallyClosed := FALSE when the
+        terminal reports its status bits active-high (the Beckhoff EL32xx
+        process data default).
+
     Deprecated as of 2020-03-02, please use FB_TempSensor instead
     2019-10-09 Zachary Lentz
+    2026-11-27 taio: the raw fault/status inputs are now interpreted as
+        normally closed / fail-safe through F_TempSensor_Connected, so a
+        de-energized input (broken wiring, unpowered terminal) reports the
+        sensor as not connected instead of healthy (audit finding 0efeb122).
 *)
 {warning 'Function Block FB_ThermoCouple is deprecated and may be removed in a future release'}
 VAR_INPUT
     // Ratio between raw value and actual temperature. Default is 10 for 10 steps per degree (or 0.1 degree resolution)
     iScale: INT := 10;
+
+    // Input polarity of the raw fault/status inputs: TRUE (default) treats them as fail-safe normally closed
+    // contacts, where a de-energized input (FALSE) is a fault. Set FALSE for terminals that report their status
+    // bits active-high, e.g. the Beckhoff EL32xx process data default.
+    bInputsNormallyClosed: BOOL := TRUE;
 END_VAR
 VAR_OUTPUT
     {attribute 'pytmc' := '
@@ -39,8 +57,14 @@ VAR
     iRaw AT %I*: INT;
 END_VAR]]></Declaration>
     <Implementation>
-      <ST><![CDATA[// The manual states that we are disconnected if we are both overrange and in an error state
-bConnected := NOT (bOverrange AND bError);
+      <ST><![CDATA[// The raw fault/status inputs are evaluated as normally closed / fail-safe contacts, so a
+// de-energized input (broken wiring, missing terminal, unpowered hardware) forces bConnected
+// FALSE instead of reporting a healthy sensor that has in fact lost its signal.
+bConnected := F_TempSensor_Connected(
+    i_bError := bError,
+    i_bOverrange := bOverrange,
+    i_bInputsNormallyClosed := bInputsNormallyClosed);
+
 fTemp := INT_TO_LREAL(iRaw) / iScale;]]></ST>
     </Implementation>
   </POU>

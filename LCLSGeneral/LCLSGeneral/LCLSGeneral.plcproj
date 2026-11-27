@@ -206,6 +206,9 @@
     <Compile Include="POUs\Functions\F_ConvertTicksToUnixTimestamp.TcPOU">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="POUs\Functions\F_TempSensor_Connected.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="POUs\Functions\TIME_TO_100NS.TcPOU">
       <SubType>Code</SubType>
     </Compile>
@@ -289,6 +292,9 @@
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="POUs\Tests\FB_Test_EpicsMotorMonitor.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Include="POUs\Tests\F_TempSensor_Connected_Test.TcPOU">
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="POUs\Tests\ResetCircuitBreakerGlobals.TcPOU">

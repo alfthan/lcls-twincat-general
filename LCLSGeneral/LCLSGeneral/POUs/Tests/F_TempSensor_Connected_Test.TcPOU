@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="F_TempSensor_Connected_Test" Id="{9b331be2-a70f-46a7-b380-b27246a7aaab}" SpecialFunc="None">
+    <Declaration><![CDATA[(*
+    Unit tests for F_TempSensor_Connected.
+
+    Purpose:
+        Verify the fail-safe normally closed interpretation of the temperature
+        sensor fault/status inputs, in particular that loss of signal (both raw
+        inputs de-energized) reports the sensor as not connected rather than
+        healthy, and that the active-high terminal polarity stays available.
+
+    History:
+        2026-11-27 taio: created (audit finding 0efeb122).
+*)
+FUNCTION_BLOCK F_TempSensor_Connected_Test EXTENDS TcUnit.FB_TestSuite
+VAR_INPUT
+END_VAR
+VAR_OUTPUT
+END_VAR
+VAR
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[FailSafeDisconnectedWhenInputsDeEnergized();
+FailSafeDisconnectedWhenOneInputDeEnergized();
+FailSafeConnectedWhenInputsEnergized();
+ActiveHighDisconnectedWhenErrorAndOverrange();
+ActiveHighConnectedWhenHealthy();
+ActiveHighConnectedWhenOverrangeOnly();]]></ST>
+    </Implementation>
+    <Method Name="FailSafeDisconnectedWhenInputsDeEnergized" Id="{47101761-222c-4afe-82e1-6bcf9d63e189}">
+      <Declaration><![CDATA[METHOD FailSafeDisconnectedWhenInputsDeEnergized
+VAR_INPUT
+END_VAR
+VAR
+    bConnected : BOOL; // Result of the connection evaluation under test
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[TEST('FailSafeDisconnectedWhenInputsDeEnergized');
+// Loss of signal: broken wiring or an unpowered terminal leaves both raw inputs FALSE.
+bConnected := F_TempSensor_Connected(
+    i_bError := FALSE,
+    i_bOverrange := FALSE,
+    i_bInputsNormallyClosed := TRUE);
+AssertFalse(bConnected,
+    'A de-energized fail-safe input pair must report the sensor as not connected');
+TEST_FINISHED();]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="FailSafeDisconnectedWhenOneInputDeEnergized" Id="{d22c4ded-be81-43a5-952b-e27b50262ef4}">
+      <Declaration><![CDATA[METHOD FailSafeDisconnectedWhenOneInputDeEnergized
+VAR_INPUT
+END_VAR
+VAR
+    bConnected : BOOL; // Result of the connection evaluation under test
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[TEST('FailSafeDisconnectedWhenOneInputDeEnergized');
+// A single de-energized contact must already be a fault, not be masked by the other one.
+bConnected := F_TempSensor_Connected(
+    i_bError := TRUE,
+    i_bOverrange := FALSE,
+    i_bInputsNormallyClosed := TRUE);
+AssertFalse(bConnected,
+    'One de-energized fail-safe input must report the sensor as not connected');
+
+bConnected := F_TempSensor_Connected(
+    i_bError := FALSE,
+    i_bOverrange := TRUE,
+    i_bInputsNormallyClosed := TRUE);
+AssertFalse(bConnected,
+    'One de-energized fail-safe input must report the sensor as not connected');
+TEST_FINISHED();]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="FailSafeConnectedWhenInputsEnergized" Id="{43e0848d-e4cb-4b07-b2dd-29107349c653}">
+      <Declaration><![CDATA[METHOD FailSafeConnectedWhenInputsEnergized
+VAR_INPUT
+END_VAR
+VAR
+    bConnected : BOOL; // Result of the connection evaluation under test
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[TEST('FailSafeConnectedWhenInputsEnergized');
+// Healthy field wiring: both normally closed contacts are energized.
+bConnected := F_TempSensor_Connected(
+    i_bError := TRUE,
+    i_bOverrange := TRUE,
+    i_bInputsNormallyClosed := TRUE);
+AssertTrue(bConnected,
+    'An energized fail-safe input pair must report the sensor as connected');
+TEST_FINISHED();]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="ActiveHighDisconnectedWhenErrorAndOverrange" Id="{fafd3ccb-f894-4381-b78e-af523c36d434}">
+      <Declaration><![CDATA[METHOD ActiveHighDisconnectedWhenErrorAndOverrange
+VAR_INPUT
+END_VAR
+VAR
+    bConnected : BOOL; // Result of the connection evaluation under test
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[TEST('ActiveHighDisconnectedWhenErrorAndOverrange');
+// Active-high terminal status bits: the manual states the sensor is disconnected when it is
+// both overrange and in an error state.
+bConnected := F_TempSensor_Connected(
+    i_bError := TRUE,
+    i_bOverrange := TRUE,
+    i_bInputsNormallyClosed := FALSE);
+AssertFalse(bConnected,
+    'An overrange sensor in an error state must report as not connected');
+TEST_FINISHED();]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="ActiveHighConnectedWhenHealthy" Id="{51125a87-e2d8-4e8c-99b3-10b9d8cc1b49}">
+      <Declaration><![CDATA[METHOD ActiveHighConnectedWhenHealthy
+VAR_INPUT
+END_VAR
+VAR
+    bConnected : BOOL; // Result of the connection evaluation under test
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[TEST('ActiveHighConnectedWhenHealthy');
+// Active-high terminal status bits: no error and no overrange is a healthy sensor.
+bConnected := F_TempSensor_Connected(
+    i_bError := FALSE,
+    i_bOverrange := FALSE,
+    i_bInputsNormallyClosed := FALSE);
+AssertTrue(bConnected,
+    'A healthy active-high sensor must report as connected');
+TEST_FINISHED();]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="ActiveHighConnectedWhenOverrangeOnly" Id="{f68b30fd-ad31-4fac-b958-fe92d8dddd1d}">
+      <Declaration><![CDATA[METHOD ActiveHighConnectedWhenOverrangeOnly
+VAR_INPUT
+END_VAR
+VAR
+    bConnected : BOOL; // Result of the connection evaluation under test
+END_VAR]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[TEST('ActiveHighConnectedWhenOverrangeOnly');
+// Active-high terminal status bits: an overrange reading alone is not a connection fault.
+bConnected := F_TempSensor_Connected(
+    i_bError := FALSE,
+    i_bOverrange := TRUE,
+    i_bInputsNormallyClosed := FALSE);
+AssertTrue(bConnected,
+    'An active-high sensor that is only overrange must still report as connected');
+TEST_FINISHED();]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>

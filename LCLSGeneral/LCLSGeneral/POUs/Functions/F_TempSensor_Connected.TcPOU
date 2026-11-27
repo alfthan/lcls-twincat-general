@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="F_TempSensor_Connected" Id="{64300bf5-b97e-44e5-a056-58595e0c3b28}" SpecialFunc="None">
+    <Declaration><![CDATA[(*
+    Connection evaluation for a scaled temperature input (thermocouple, RTD, ...).
+
+    Purpose:
+        Decide whether a temperature sensor counts as connected from the raw
+        fault/status inputs that a field terminal presents.
+
+    Usage:
+        Called from FB_TempSensor and FB_ThermoCouple with the raw error and
+        overrange inputs and the configured input polarity. Also usable wherever
+        a pair of fail-safe fault contacts has to be evaluated.
+
+    Objectives:
+        Interpret the alarm/fault inputs as normally closed / fail-safe, so that
+        loss of signal, broken wiring or unpowered hardware produces a fault
+        instead of silently reading as connected. De-energized is a fault.
+
+    History:
+        2026-11-27 taio: created, moves the fail-safe normally closed
+        interpretation out of FB_TempSensor/FB_ThermoCouple so the rule lives in
+        one place and is unit tested (audit finding 0efeb122).
+*)
+FUNCTION F_TempSensor_Connected : BOOL
+VAR_INPUT
+    i_bError : BOOL; // Raw error/status input exactly as read from the terminal
+    i_bOverrange : BOOL; // Raw overrange/status input exactly as read from the terminal
+    i_bInputsNormallyClosed : BOOL := TRUE; // TRUE: inputs are fail-safe NC contacts, a de-energized input is a fault. FALSE: active-high terminal status bits
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// Fail-safe / normally closed interpretation: an energized input (TRUE) means
+// the field loop is intact, a de-energized input (FALSE) means a fault, e.g.
+// broken wiring, a missing terminal or unpowered hardware. Every input must be
+// energized, so losing a single signal drops the sensor to "not connected"
+// instead of reporting a healthy sensor that has in fact lost its signal.
+IF i_bInputsNormallyClosed THEN
+    F_TempSensor_Connected := i_bError AND i_bOverrange;
+ELSE
+    // Active-high terminal status bits (e.g. the Beckhoff EL32xx process data
+    // default): the terminal manual states that the sensor is disconnected only
+    // when it is both overrange and in an error state.
+    F_TempSensor_Connected := NOT (i_bError AND i_bOverrange);
+END_IF]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

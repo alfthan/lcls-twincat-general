@@ -17,6 +17,8 @@ VAR
     // Hardware
     {attribute 'analysis' := '-33'}
     fbECATAutoRestartTest : FB_ECATAutoRestart_Test;
+    {attribute 'analysis' := '-33'}
+    fbTempSensorConnectedTest : F_TempSensor_Connected_Test;
 END_VAR]]></Declaration>
     <Implementation>
       <ST><![CDATA[TcUnit.RUN();]]></ST>
