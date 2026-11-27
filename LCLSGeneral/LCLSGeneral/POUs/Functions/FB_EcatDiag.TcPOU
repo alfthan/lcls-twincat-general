@@ -13,6 +13,14 @@ To start the block provide a falling edge on the first pass boolean input.
 Function block has been modified to retrieve the Device State of the Ethercat Master.
 It also exports the states and information of each individual configured Slave.
 And saves them in the array q_aEcConfSlaveInfo.
+
+2026-11-27 audit finding #87 (memory safety)
+The slave counts read back from the master (fbGetAllSlaveStates.nSlaves and
+fbGetConfSlaves.nSlaves) are external data. They are now clamped to the fixed
+buffer capacity (iSLAVEADDR_ARR_SIZE, from Global_Variables_EtherCAT) before they
+are used as FOR loop bounds, so an over-large count can no longer index past
+astTermStates, astEcConfSlaveInfo, q_anTermStates or q_astEcConfSlaveInfo.
+Truncation of the reported count is signalled on q_xSlaveCountValid.
 *)
 FUNCTION_BLOCK FB_EcatDiag
 VAR_INPUT
@@ -22,17 +30,18 @@ VAR_INPUT
 END_VAR
 VAR_OUTPUT
     q_xAllSlaveStatesGood: BOOL; // Set to True if all Slaves are in OP State
-    q_anTermStates: ARRAY[1..256] OF BYTE; //ECAT State of terminals in the bus
+    q_anTermStates: ARRAY[1..iSLAVEADDR_ARR_SIZE] OF BYTE; //ECAT State of terminals in the bus
     q_xMasterStateGood:BOOL; // Set to True if the Master Device State is OP
     q_nMasterState: WORD; // The Device State of the Master
     q_sMasterState:STRING; //State of the ECAT master
-    q_astEcConfSlaveInfo :  ARRAY[1..256] OF ST_EcDevice; //State of all ECAT slaves in the bus
-    q_nSlaves: UINT; // the Number of the connected Slaves
+    q_astEcConfSlaveInfo :  ARRAY[1..iSLAVEADDR_ARR_SIZE] OF ST_EcDevice; //State of all ECAT slaves in the bus
+    q_nSlaves: UINT; // the Number of the connected Slaves (clamped to iSLAVEADDR_ARR_SIZE)
+    q_xSlaveCountValid: BOOL; //FALSE when the master reported more slaves than the fixed buffers hold (buffers truncated)
 END_VAR
 VAR
     sNetId: T_AmsNetId; //NetId string
-    astTermStates: ARRAY[1..256] OF ST_EcSlaveState; //ECAT Slave States Buffer
-    astEcConfSlaveInfo: ARRAY[1..256] OF ST_EcSlaveConfigData; //ECAT Slave Configs Buffer
+    astTermStates: ARRAY[1..iSLAVEADDR_ARR_SIZE] OF ST_EcSlaveState; //ECAT Slave States Buffer
+    astEcConfSlaveInfo: ARRAY[1..iSLAVEADDR_ARR_SIZE] OF ST_EcSlaveConfigData; //ECAT Slave Configs Buffer
     fbGetAllSlaveStates: FB_EcGetAllSlaveStates; //Acquires the ECAT Slave States puts them into astTermStates
 
     fbGetMasterState: FB_EcGetMasterState; //Acquires ECAT Master State
@@ -42,6 +51,8 @@ VAR
     {attribute 'naming' := 'omit'}
     ftMasterReset: F_TRIG; //Retrigger sensor for GetMasterState
     nIterator: INT; //Generic iterator placeholder
+    nSlaveCountStates: INT; //Slave count from fbGetAllSlaveStates clamped to the astTermStates buffer size
+    nSlaveCountConf: INT; //Slave count from fbGetConfSlaves clamped to the astEcConfSlaveInfo buffer size
 END_VAR
 ]]></Declaration>
     <Implementation>
@@ -58,9 +69,17 @@ fbGetAllSlaveStates(sNetId:=sNetId, pStateBuf := ADR(astTermStates), cbBufLen:=S
 
 //Cycle through each entry in the array and check if we have anyone not in OP and that the link state is good.
 // If so, then set our global IO bad boolean.
-IF fbGetAllSlaveStates.nSlaves > 0 THEN
+//The slave count is external data: clamp it to the buffer capacity before it is
+//used as a loop bound, so an over-large count cannot index past the arrays.
+IF fbGetAllSlaveStates.nSlaves > iSLAVEADDR_ARR_SIZE THEN
+    nSlaveCountStates := UINT_TO_INT(iSLAVEADDR_ARR_SIZE);
+ELSE
+    nSlaveCountStates := UINT_TO_INT(fbGetAllSlaveStates.nSlaves);
+END_IF
+
+IF nSlaveCountStates > 0 THEN
     q_xAllSlaveStatesGood := TRUE;
-FOR nIterator := 1 TO (UINT_TO_INT(fbGetAllSlaveStates.nSlaves) ) BY 1
+FOR nIterator := 1 TO nSlaveCountStates BY 1
     DO
     IF NOT( (astTermStates[nIterator].deviceState = EC_DEVICE_STATE_OP) AND (astTermStates[nIterator].linkState = EC_LINK_STATE_OK)) THEN
         q_xAllSlaveStatesGood := FALSE;
@@ -85,10 +104,23 @@ q_sMasterState := F_ConvMasterDevStateToString(fbGetMasterState.state);
 //This function is used to read a list of all configured slaves from the EtherCat master object Directory
 //needs to run only once
 fbGetConfSlaves(bExecute := i_xFirstPass, sNetId :=sNetId, pArrEcConfSlaveInfo := ADR(astEcConfSlaveInfo),cbBufLen := SIZEOF(astEcConfSlaveInfo));
-q_nSlaves:=fbGetConfSlaves.nSlaves;
+
+//Same for the configured-slave count: report and iterate over only as many slaves
+//as the fixed buffers hold, never the raw count read back from the master.
+IF fbGetConfSlaves.nSlaves > iSLAVEADDR_ARR_SIZE THEN
+    nSlaveCountConf := UINT_TO_INT(iSLAVEADDR_ARR_SIZE);
+    q_nSlaves := iSLAVEADDR_ARR_SIZE;
+ELSE
+    nSlaveCountConf := UINT_TO_INT(fbGetConfSlaves.nSlaves);
+    q_nSlaves := fbGetConfSlaves.nSlaves;
+END_IF
+
+//Flag any count the fixed buffers could not hold. This follows the current master
+//response, so it clears again once the bus reports a normal slave count.
+q_xSlaveCountValid := (fbGetAllSlaveStates.nSlaves <= iSLAVEADDR_ARR_SIZE) AND (fbGetConfSlaves.nSlaves <= iSLAVEADDR_ARR_SIZE);
 
 IF  NOT (fbGetConfSlaves.bBusy) THEN
-    FOR nIterator := 1 TO (UINT_TO_INT(fbGetConfSlaves.nSlaves) ) BY 1
+    FOR nIterator := 1 TO nSlaveCountConf BY 1
     DO
     q_astEcConfSlaveInfo[nIterator].nAddrr :=astEcConfSlaveInfo[nIterator].nAddr;
     q_astEcConfSlaveInfo[nIterator].sName :=astEcConfSlaveInfo[nIterator].sName;
