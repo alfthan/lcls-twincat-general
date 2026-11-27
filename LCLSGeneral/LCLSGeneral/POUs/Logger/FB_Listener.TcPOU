@@ -201,12 +201,37 @@ END_IF
 
 FOR nEvent := 0 TO nMaxEvents - 1 DO
     stPendingEvent REF= stPendingEvents[nEvent];
+
+    // Never dereference an unassigned reference: skip the slot entirely
+    IF NOT __ISVALIDREF(stPendingEvent) THEN
+        CONTINUE;
+    END_IF
+
     IF NOT stPendingEvent.bInUse THEN
         CONTINUE;
     END_IF
 
     fbRequestEventText REF= stPendingEvent.fbRequestEventText;
     stEventInfo 	   REF= stPendingEvent.stEventInfo;
+
+    // Validate both references before touching their members. A slot whose
+    // reference was never assigned (or a NULL source) must be dropped and
+    // reported, not dereferenced, otherwise the bad event faults the task.
+    IF NOT __ISVALIDREF(fbRequestEventText)
+    OR NOT __ISVALIDREF(stEventInfo) THEN
+        ADSLOGSTR(
+            msgCtrlMask := ADSLOG_MSGTYPE_ERROR,
+            msgFmtStr   := 'Skipping pending log event %s: invalid reference',
+            strArg      := UINT_TO_STRING(nEvent),
+        );
+
+        // Release the slot so an invalid event cannot block the buffer forever
+        IF nPendingEvents > 0 THEN
+            nPendingEvents := nPendingEvents - 1;
+        END_IF
+        stPendingEvent.bInUse := FALSE;
+        CONTINUE;
+    END_IF
 
     IF fbRequestEventText.bError THEN
         stEventInfo.Msg := '(Unable to retrieve message)';
@@ -281,10 +306,13 @@ VAR
     nFailures		:	UINT := 0;
 END_VAR]]></Declaration>
       <Implementation>
-        <ST><![CDATA[IF fbEvent.eSeverity < eMinSeverity THEN
-    // Ignore all messages below the minimum severity
+        <ST><![CDATA[// Never dereference an unassigned or NULL event reference
+IF NOT __ISVALIDREF(fbEvent) THEN
     RETURN;
-ELSIF NOT __ISVALIDREF(fbEvent) THEN
+END_IF
+
+IF fbEvent.eSeverity < eMinSeverity THEN
+    // Ignore all messages below the minimum severity
     RETURN;
 END_IF
 
@@ -310,6 +338,15 @@ nCntMessagesSent 		:=	nCntMessagesSent + 1;
 
 stPendingEvent			REF= stPendingEvents[nEventIdx];
 stEventInfo 			REF= stPendingEvent.stEventInfo;
+
+// Never dereference an unassigned reference: drop the event instead of faulting
+IF NOT __ISVALIDREF(stPendingEvent)
+OR NOT __ISVALIDREF(stEventInfo) THEN
+    // Undo the reservation made above so the pending count stays consistent
+    nPendingEvents := nPendingEvents - 1;
+    RETURN;
+END_IF
+
 stPendingEvent.bInUse 	:= TRUE;
 
 stEventInfo.id 			:= fbEvent.nEventId;
