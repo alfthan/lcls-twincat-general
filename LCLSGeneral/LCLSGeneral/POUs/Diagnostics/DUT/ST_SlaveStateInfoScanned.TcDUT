@@ -3,7 +3,7 @@
   <DUT Name="ST_SlaveStateInfoScanned" Id="{e8e9bb31-f435-4b04-a212-e1f506658743}">
     <Declaration><![CDATA[TYPE ST_SlaveStateInfoScanned :
 STRUCT
-    nIndex 			: DINT;
+    nIndex 			: DINT;		(* 1-based index of slave in scanned EtherCAT slave list *)
     sName 			: STRING; 		(* name of slave given in System Manager *)
     sType 			: STRING;		(* type of slave, e.g. EK1100*)
     nECAddr 		: UINT;			(* EtherCAT Slave Addr *)
