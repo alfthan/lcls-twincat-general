@@ -1,21 +1,103 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1">
   <POU Name="FB_GetPLCHostname" Id="{bd570dd7-dba7-4a18-a0ee-a97d90c7deaf}" SpecialFunc="None">
-    <Declaration><![CDATA[FUNCTION_BLOCK FB_GetPLCHostname
+    <Declaration><![CDATA[(*
+    FB_GetPLCHostname - reads this PLC's own hostname over ADS.
+
+    PURPOSE
+        Reports the hostname (computer name) of the target the program runs
+        on, so callers that must identify this PLC in a text record - for
+        example the "Logging system online" JSON document FB_LogHandler emits
+        - do not each have to build their own ADS request.
+
+    USAGE
+        Call every cycle with bEnable := TRUE and use sHostname once bDone is
+        TRUE:
+
+            fbGetHostName : FB_GetPLCHostname;
+            fbGetHostName(bEnable := TRUE, sHostname => GVL_Logger.sPlcHostname);
+
+        There is no execute edge: bEnable level-enables the block, bDone
+        latches the successful result, bError reports the failing one.
+
+    OBJECTIVES
+        - Wrap Tc2_Utilities.FB_GetHostName - which needs a NetID, an execute
+          edge and a busy/error handshake - in a level-enabled block with a
+          latched bDone, so a caller only supplies TRUE and reads a string.
+        - Address the local system only: sNetID is fixed to '' (empty AMS
+          NetID = the PLC this code runs on), so the block cannot be pointed
+          at a remote target by accident.
+        - Re-arm the child block once before the first request, so a bExecute
+          that is already TRUE cannot swallow the first command.
+        - Stop polling once the hostname is known: bDone gates the request, so
+          a settled PLC issues no further ADS traffic.
+
+    HISTORY
+        2021-10-22 / Ken Lauer
+            Block created; split out of the combined IP-address helper, with
+            the periodic retry added in the same change.
+        2021-11-30 / Ken Lauer
+            Enable input renamed from bExecute to bEnable.
+        2026-11-27 / Scirix Agent
+            Added this header comment and the member comments below;
+            documentation only, no behaviour change (convention
+            conv_321640e095c0).
+
+    NOTE
+        Behaviour read off the implementation below, recorded so the next
+        maintainer does not have to re-derive it:
+        - bDone latches TRUE and is never cleared inside the block; only a PLC
+          restart or a re-download resets it.
+        - The retry path does not currently fire. bReset is a single-scan
+          pulse, so tRetry (a TON driven by bReset) never accumulates
+          tRetryDelay and tRetry.Q is never TRUE. The block therefore makes one
+          acquisition attempt per PLC start; if that attempt fails, bExecute
+          stays TRUE, which is not a re-trigger edge for the ADS block.
+          tRetryDelay documents intended behaviour, not achieved behaviour.
+*)
+FUNCTION_BLOCK FB_GetPLCHostname
 VAR_INPUT
+    // TRUE enables hostname acquisition. While it is FALSE the body is
+    // skipped: the child block is not called and every output keeps its
+    // last value.
     bEnable			: BOOL;
+    // Retry interval, TIME (ms resolution). Intended as the delay before a
+    // failed acquisition is attempted again; default T#10s. Not currently
+    // reached - see the NOTE in the POU header.
     tRetryDelay		: TIME := T#10s;
 END_VAR
 VAR_OUTPUT
+    // Hostname (computer name) of this PLC as returned by FB_GetHostName.
+    // T_MaxString = STRING(255); no units. Written once, when the request
+    // completes without error, and left untouched otherwise (so it stays
+    // '' until the first successful acquisition).
     sHostname		: T_MaxString;
+    // Latched completion flag: TRUE once sHostname has been captured and
+    // the request is finished. Never cleared inside the block, so it stays
+    // TRUE until the PLC restarts or is re-downloaded. Callers use it as
+    // "the hostname is available" and as the gate that stops polling.
     bDone 			: BOOL;
+    // Acquisition failed. Mirrors fbGetHostName.bError, so it is not latched
+    // here: it follows the child block, which clears it only when re-armed
+    // with bExecute = FALSE. bDone remains FALSE while bError is TRUE.
     bError			: BOOL;
 END_VAR
 VAR
+    // Tc2_Utilities hostname reader. sNetID is fixed to '' (local system)
+    // by the body, and bExecute is driven by this block, not by the caller.
     fbGetHostName	: FB_GetHostName;
 
+    // Retry timer, TIME: measures tRetryDelay after the re-arm pulse. As
+    // written its IN is a single-scan pulse, so Q is never reached (see the
+    // NOTE in the POU header).
     tRetry 			: TON;
+    // One-scan re-arm pulse: drives fbGetHostName.bExecute FALSE for one scan
+    // (the falling edge re-arms the ADS block) and starts tRetry. Cleared
+    // again in the same cycle, after the child call and the timer.
     bReset			: BOOL;
+    // TRUE from the first enabled scan onwards, so the re-arm happens once
+    // per PLC start instead of every cycle. FALSE again after a download or
+    // a restart.
     bInitialized	: BOOL := FALSE;
 
 END_VAR
