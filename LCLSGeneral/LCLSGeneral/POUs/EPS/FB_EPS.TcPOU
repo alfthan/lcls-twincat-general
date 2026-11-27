@@ -39,7 +39,7 @@ IF (TO_BOOL(nBitValue)) <> bValue THEN
 END_IF
 
 // Check if all values are true
-IF eps.nFlags = 16#FFFFFFFF THEN
+IF eps.nFlags = GeneralConstants.EPS_ALL_FLAGS THEN
     eps.bEPS_OK := TRUE;
 ELSE
     eps.bEPS_OK := FALSE;

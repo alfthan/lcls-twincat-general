@@ -9,6 +9,12 @@ VAR_GLOBAL CONSTANT
     // You can make this smaller if you want to use less memory in your program in exchange for limiting your max state count
     // You can make this larger if you want to use states-based FBs sized beyond the EPICS enum limit
     MAX_STATES: UINT := 15;
+
+    // Mask with every EPS flag set, matching the width of DUT_EPS.nFlags (UDINT, 32 bits).
+    // FB_EPS.setBit derives bEPS_OK by comparing nFlags against this mask, so the
+    // all-flags check and the DUT's initial value share one declaration: change the
+    // flag count or width here and every comparison follows.
+    EPS_ALL_FLAGS: UDINT := 16#FFFFFFFF;
 END_VAR
 ]]></Declaration>
   </GVL>

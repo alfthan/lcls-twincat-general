@@ -9,7 +9,7 @@ STRUCT
         io: i
         field: DESC Contains EPS flags
     '}
-    nFlags: UDINT := 16#FFFFFFFF;
+    nFlags: UDINT := GeneralConstants.EPS_ALL_FLAGS;
 
     // Desciption of values nFlags contains
     {attribute 'pytmc' := '
