@@ -1,7 +1,69 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1">
   <POU Name="FB_EtherCATDiag" Id="{4742d405-d1cb-49f3-8224-ceacd75d7213}" SpecialFunc="None">
-    <Declaration><![CDATA[FUNCTION_BLOCK FB_EtherCATDiag
+    <Declaration><![CDATA[(*
+    Deep EtherCAT diagnostic for one EtherCAT master: turns the cyclic master inputs into
+    one bus verdict and, when a fault appears or clears, runs an acyclic ADS sweep over the
+    slaves and writes the detail to the shared logger.
+
+    Purpose:
+        Classify the state of a whole EtherCAT bus and collect the detail behind a fault.
+        The cyclic inputs - frame working-counter state, found vs configured slave count and
+        the master device state word - yield bEtherCATOK plus the separate bFrameWcStateError
+        / bSlaveCountError / bMasterDevStateError flags. A change in any of them triggers a
+        non-blocking ADS diagnostic that reads slave addresses, slave states, the bus
+        topology and the identity/name of every slave, then logs one JSON record per slave
+        through FB_LogMessage, so a bus failure is visible in the shared diagnostic stream
+        next to the rest of the PLC's events.
+
+    Usage:
+        Declare one instance per EtherCAT master, call it every PLC cycle and wire every
+        cyclic input from that master's IO inputs - the block reads no IO of its own, so an
+        unwired net id or slave count silently disables the diagnostic:
+
+            fbDiag(
+                sIPCNetID           := '',                     // this IPC AmsNetId (name lookup)
+                sMasterNetID        := sEcMasterNetId,         // AmsNetId of the master (InfoData)
+                nMasterDevID        := nEcMasterDeviceId,      // DevId of the master (InfoData)
+                nSlaveCount         := nEcMasterSlaveCount,    // Inputs^.SlaveCount
+                nSlaveCountCfg      := nEcMasterSlaveCountCfg, // InfoData^.CfgSlaveCount
+                nMasterDevState     := nEcMasterDevState,      // Inputs^.DevState
+                bAllFrameWcStatesOK := bAllFrameWcStatesOK,    // frame diagnostic result
+                tTimeout            := T#5S,                   // per ADS request
+                arrDiagSlaveInfo    := arrDiagSlaveInfo,       // VAR_IN_OUT diagnostic results
+                arrDiagSlaveInfoScanned := arrDiagSlaveInfoScanned
+            );
+
+        sMasterNetID is mandatory: while it is empty or '0.0.0.0.0.0' the block sets bError
+        and iErrorID = 7 instead of starting a diagnostic, so a mis-supplied net id surfaces
+        as an error rather than as a silent "bus OK". sIPCNetID is used only for the box-name
+        lookups and may stay empty for the local IPC. tTimeout bounds every ADS request.
+        arrDiagSlaveInfo and arrDiagSlaveInfoScanned are VAR_IN_OUT results owned by the
+        caller and are cleared when the bus has no diagnostic data to report.
+
+        Normal callers do not drive this block directly: FB_EcatDiagWrapper links these
+        inputs to the master's PDO tree and republishes the verdicts.
+
+    Objectives:
+        - Separate frame, slave-count and master-device faults so a consumer can classify
+          the failure without waiting for the ADS detail.
+        - Never block the PLC cycle: every ADS step is a non-blocking FB polled by an
+          explicit state machine (E_EcatDiagState) and each request is bounded by tTimeout.
+        - Report a faulted bus as structured JSON in the shared logger, not as ad-hoc
+          strings, so remote diagnostics consumers can parse it.
+        - Document the external wiring contract, because the block is useless while its
+          inputs are unwired and nothing else can detect that.
+
+    History:
+        Alex Wallace  2020-03-13  Original version (EtherCAT diagnostic example).
+        Alex Wallace  2020-03-15  Slave states, topology and per-slave identity and name;
+                                  logging moved to FB_LogMessage.
+        Alex Wallace  2020-03-30  Per-slave JSON diagnostic payload.
+        K Lauer       2021-11-02  Pre-commit formatting clean-up.
+        Z. Lentz      2023-05-25  Accept the duplicated internal variable names.
+        Agent         2026-11-27  Added the POU header (purpose/usage/objectives/history).
+*)
+FUNCTION_BLOCK FB_EtherCATDiag
 VAR_INPUT
     sIPCNetID					: T_AmsNetId; 	// AmsNetId of the IPC
     sMasterNetID				: T_AmsNetId; 	// AmsNetId of the EtherCAT master device
