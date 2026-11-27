@@ -6,6 +6,12 @@ VAR_INPUT
     sNetId          : T_AmsNetId;
     nSlaveAddr      : UINT;
     sDeviceDesc		: T_MaxString := 'TERM #';
+
+    {attribute 'pytmc' := '
+        pv: bAcknowledge
+        io: i
+    '}
+    bAcknowledge    : BOOL; // Rising edge clears the latched bDevError when no state request is in flight
 END_VAR
 VAR_OUTPUT
 END_VAR
@@ -58,6 +64,11 @@ VAR
     fbgetStatusTimer : TON;
     bInit : BOOL := TRUE;
 
+    bAckAllowed : BOOL; // TRUE on the scan in which an acknowledge is honoured
+    rtAcknowledge : R_TRIG; // Detects the rising edge of bAcknowledge
+    rtSetStateError : R_TRIG; // Detects a new error from fbsetSlaveState
+    sErrorMsgCurrent : STRING; // Error text of the error fbsetSlaveState reports now
+
 END_VAR
 ]]></Declaration>
     <Implementation>
@@ -94,77 +105,96 @@ CASE fbgetSlaveState.state.deviceState OF
         eDevState := E_ECAT_STATES.ERROR;
 END_CASE
 
-bDevError := fbsetSlaveState.bError;
-
-IF bCmdReqState AND (bDevError OR (NOT fbsetSlaveState.bBusy)) THEN
+// Cancel the one-shot state request once the set-state FB has finished or
+// failed. The live sub-block error is used on purpose: bDevError is a latched
+// fault now, and must not suppress a new operator request.
+IF bCmdReqState AND (fbsetSlaveState.bError OR (NOT fbsetSlaveState.bBusy)) THEN
     bCmdReqState := FALSE;
 END_IF
 
 CASE fbsetSlaveState.nErrId OF
-    0: sErrorMessage := '';
+    0: sErrorMsgCurrent := '';
     // --- Device errors (0x700 - 0x739) ---
-    1792: sErrorMessage := 'ADSERR_DEVICE_ERROR - General device error.';
-    1793: sErrorMessage := 'ADSERR_DEVICE_SRVNOTSUPP - Service is not supported by the server.';
-    1794: sErrorMessage := 'ADSERR_DEVICE_INVALIDGRP - Invalid index group.';
-    1795: sErrorMessage := 'ADSERR_DEVICE_INVALIDOFFSET - Invalid index offset.';
-    1796: sErrorMessage := 'ADSERR_DEVICE_INVALIDACCESS - Reading or writing not permitted. ';
-    1797: sErrorMessage := 'ADSERR_DEVICE_INVALIDSIZE - Parameter size not correct.';
-    1798: sErrorMessage := 'ADSERR_DEVICE_INVALIDDATA - Invalid data values.';
-    1799: sErrorMessage := 'ADSERR_DEVICE_NOTREADY - Device is not ready to operate.';
-    1800: sErrorMessage := 'ADSERR_DEVICE_BUSY - Device is busy.';
-    1801: sErrorMessage := 'ADSERR_DEVICE_INVALIDCONTEXT - Invalid operating system context.';
-    1802: sErrorMessage := 'ADSERR_DEVICE_NOMEMORY - Insufficient memory.';
-    1803: sErrorMessage := 'ADSERR_DEVICE_INVALIDPARM - Invalid parameter values.';
-    1804: sErrorMessage := 'ADSERR_DEVICE_NOTFOUND - Not found (files, ...).';
-    1805: sErrorMessage := 'ADSERR_DEVICE_SYNTAX - Syntax error in file or command.';
-    1806: sErrorMessage := 'ADSERR_DEVICE_INCOMPATIBLE - Objects do not match.';
-    1807: sErrorMessage := 'ADSERR_DEVICE_EXISTS - Object already exists.';
-    1808: sErrorMessage := 'ADSERR_DEVICE_SYMBOLNOTFOUND - Symbol not found.';
-    1809: sErrorMessage := 'ADSERR_DEVICE_SYMBOLVERSIONINVALID - Invalid symbol version. This can occur due to an online change. Create a new handle.';
-    1810: sErrorMessage := 'ADSERR_DEVICE_INVALIDSTATE - Device (server) is in invalid state.';
-    1811: sErrorMessage := 'ADSERR_DEVICE_TRANSMODENOTSUPP - AdsTransMode not supported.';
-    1812: sErrorMessage := 'ADSERR_DEVICE_NOTIFYHNDINVALID - Notification handle is invalid.';
-    1813: sErrorMessage := 'ADSERR_DEVICE_CLIENTUNKNOWN - Notification client not registered.';
-    1814: sErrorMessage := 'ADSERR_DEVICE_NOMOREHDLS - No further handle available.';
-    1815: sErrorMessage := 'ADSERR_DEVICE_INVALIDWATCHSIZE - Notification size too large.';
-    1816: sErrorMessage := 'ADSERR_DEVICE_NOTINIT - Device not initialized.';
-    1817: sErrorMessage := 'ADSERR_DEVICE_TIMEOUT - Device has a timeout.';
-    1818: sErrorMessage := 'ADSERR_DEVICE_NOINTERFACE - Interface query failed.';
-    1819: sErrorMessage := 'ADSERR_DEVICE_INVALIDINTERFACE - Wrong interface requested.';
-    1820: sErrorMessage := 'ADSERR_DEVICE_INVALIDCLSID - Class ID is invalid.';
-    1821: sErrorMessage := 'ADSERR_DEVICE_INVALIDOBJID - Object ID is invalid.';
-    1822: sErrorMessage := 'ADSERR_DEVICE_PENDING - Request pending.';
-    1823: sErrorMessage := 'ADSERR_DEVICE_ABORTED - Request is aborted.';
-    1824: sErrorMessage := 'ADSERR_DEVICE_WARNING - Signal warning.';
-    1825: sErrorMessage := 'ADSERR_DEVICE_INVALIDARRAYIDX - Invalid array index.';
-    1826: sErrorMessage := 'ADSERR_DEVICE_SYMBOLNOTACTIVE - Symbol not active.';
-    1827: sErrorMessage := 'ADSERR_DEVICE_ACCESSDENIED - Access denied.';
-    1828: sErrorMessage := 'ADSERR_DEVICE_LICENSENOTFOUND - Missing license.';
-    1829: sErrorMessage := 'ADSERR_DEVICE_LICENSEEXPIRED - License expired.';
-    1830: sErrorMessage := 'ADSERR_DEVICE_LICENSEEXCEEDED - License exceeded.';
-    1831: sErrorMessage := 'ADSERR_DEVICE_LICENSEINVALID - Invalid license.';
-    1832: sErrorMessage := 'ADSERR_DEVICE_LICENSESYSTEMID - License problem: System ID is invalid.';
-    1833: sErrorMessage := 'ADSERR_DEVICE_LICENSENOTIMELIMIT - License not limited in time.';
-    1834: sErrorMessage := 'ADSERR_DEVICE_LICENSEFUTUREISSUE - Licensing problem: time in the future.';
-    1835: sErrorMessage := 'ADSERR_DEVICE_LICENSETIMETOLONG - License period too long.';
-    1836: sErrorMessage := 'ADSERR_DEVICE_EXCEPTION - Exception at system startup.';
-    1837: sErrorMessage := 'ADSERR_DEVICE_LICENSEDUPLICATED - License file read twice.';
-    1838: sErrorMessage := 'ADSERR_DEVICE_SIGNATUREINVALID - Invalid signature.';
-    1839: sErrorMessage := 'ADSERR_DEVICE_CERTIFICATEINVALID - Invalid certificate.';
-    1840: sErrorMessage := 'ADSERR_DEVICE_LICENSEOEMNOTFOUND - Public key not known from OEM.';
-    1841: sErrorMessage := 'ADSERR_DEVICE_LICENSERESTRICTED - License not valid for this system ID.';
-    1842: sErrorMessage := 'ADSERR_DEVICE_LICENSEDEMODENIED - Demo license prohibited.';
-    1843: sErrorMessage := 'ADSERR_DEVICE_INVALIDFNCID - Invalid function ID.';
-    1844: sErrorMessage := 'ADSERR_DEVICE_OUTOFRANGE - Outside the valid range.';
-    1845: sErrorMessage := 'ADSERR_DEVICE_INVALIDALIGNMENT - Invalid alignment.';
-    1846: sErrorMessage := 'ADSERR_DEVICE_LICENSEPLATFORM - Invalid platform level.';
-    1847: sErrorMessage := 'ADSERR_DEVICE_FORWARD_PL - Context - forward to passive level.';
-    1848: sErrorMessage := 'ADSERR_DEVICE_FORWARD_DL - Context - forward to dispatch level.';
-    1849: sErrorMessage := 'ADSERR_DEVICE_FORWARD_RT - Context - forward to real-time.';
+    1792: sErrorMsgCurrent := 'ADSERR_DEVICE_ERROR - General device error.';
+    1793: sErrorMsgCurrent := 'ADSERR_DEVICE_SRVNOTSUPP - Service is not supported by the server.';
+    1794: sErrorMsgCurrent := 'ADSERR_DEVICE_INVALIDGRP - Invalid index group.';
+    1795: sErrorMsgCurrent := 'ADSERR_DEVICE_INVALIDOFFSET - Invalid index offset.';
+    1796: sErrorMsgCurrent := 'ADSERR_DEVICE_INVALIDACCESS - Reading or writing not permitted. ';
+    1797: sErrorMsgCurrent := 'ADSERR_DEVICE_INVALIDSIZE - Parameter size not correct.';
+    1798: sErrorMsgCurrent := 'ADSERR_DEVICE_INVALIDDATA - Invalid data values.';
+    1799: sErrorMsgCurrent := 'ADSERR_DEVICE_NOTREADY - Device is not ready to operate.';
+    1800: sErrorMsgCurrent := 'ADSERR_DEVICE_BUSY - Device is busy.';
+    1801: sErrorMsgCurrent := 'ADSERR_DEVICE_INVALIDCONTEXT - Invalid operating system context.';
+    1802: sErrorMsgCurrent := 'ADSERR_DEVICE_NOMEMORY - Insufficient memory.';
+    1803: sErrorMsgCurrent := 'ADSERR_DEVICE_INVALIDPARM - Invalid parameter values.';
+    1804: sErrorMsgCurrent := 'ADSERR_DEVICE_NOTFOUND - Not found (files, ...).';
+    1805: sErrorMsgCurrent := 'ADSERR_DEVICE_SYNTAX - Syntax error in file or command.';
+    1806: sErrorMsgCurrent := 'ADSERR_DEVICE_INCOMPATIBLE - Objects do not match.';
+    1807: sErrorMsgCurrent := 'ADSERR_DEVICE_EXISTS - Object already exists.';
+    1808: sErrorMsgCurrent := 'ADSERR_DEVICE_SYMBOLNOTFOUND - Symbol not found.';
+    1809: sErrorMsgCurrent := 'ADSERR_DEVICE_SYMBOLVERSIONINVALID - Invalid symbol version. This can occur due to an online change. Create a new handle.';
+    1810: sErrorMsgCurrent := 'ADSERR_DEVICE_INVALIDSTATE - Device (server) is in invalid state.';
+    1811: sErrorMsgCurrent := 'ADSERR_DEVICE_TRANSMODENOTSUPP - AdsTransMode not supported.';
+    1812: sErrorMsgCurrent := 'ADSERR_DEVICE_NOTIFYHNDINVALID - Notification handle is invalid.';
+    1813: sErrorMsgCurrent := 'ADSERR_DEVICE_CLIENTUNKNOWN - Notification client not registered.';
+    1814: sErrorMsgCurrent := 'ADSERR_DEVICE_NOMOREHDLS - No further handle available.';
+    1815: sErrorMsgCurrent := 'ADSERR_DEVICE_INVALIDWATCHSIZE - Notification size too large.';
+    1816: sErrorMsgCurrent := 'ADSERR_DEVICE_NOTINIT - Device not initialized.';
+    1817: sErrorMsgCurrent := 'ADSERR_DEVICE_TIMEOUT - Device has a timeout.';
+    1818: sErrorMsgCurrent := 'ADSERR_DEVICE_NOINTERFACE - Interface query failed.';
+    1819: sErrorMsgCurrent := 'ADSERR_DEVICE_INVALIDINTERFACE - Wrong interface requested.';
+    1820: sErrorMsgCurrent := 'ADSERR_DEVICE_INVALIDCLSID - Class ID is invalid.';
+    1821: sErrorMsgCurrent := 'ADSERR_DEVICE_INVALIDOBJID - Object ID is invalid.';
+    1822: sErrorMsgCurrent := 'ADSERR_DEVICE_PENDING - Request pending.';
+    1823: sErrorMsgCurrent := 'ADSERR_DEVICE_ABORTED - Request is aborted.';
+    1824: sErrorMsgCurrent := 'ADSERR_DEVICE_WARNING - Signal warning.';
+    1825: sErrorMsgCurrent := 'ADSERR_DEVICE_INVALIDARRAYIDX - Invalid array index.';
+    1826: sErrorMsgCurrent := 'ADSERR_DEVICE_SYMBOLNOTACTIVE - Symbol not active.';
+    1827: sErrorMsgCurrent := 'ADSERR_DEVICE_ACCESSDENIED - Access denied.';
+    1828: sErrorMsgCurrent := 'ADSERR_DEVICE_LICENSENOTFOUND - Missing license.';
+    1829: sErrorMsgCurrent := 'ADSERR_DEVICE_LICENSEEXPIRED - License expired.';
+    1830: sErrorMsgCurrent := 'ADSERR_DEVICE_LICENSEEXCEEDED - License exceeded.';
+    1831: sErrorMsgCurrent := 'ADSERR_DEVICE_LICENSEINVALID - Invalid license.';
+    1832: sErrorMsgCurrent := 'ADSERR_DEVICE_LICENSESYSTEMID - License problem: System ID is invalid.';
+    1833: sErrorMsgCurrent := 'ADSERR_DEVICE_LICENSENOTIMELIMIT - License not limited in time.';
+    1834: sErrorMsgCurrent := 'ADSERR_DEVICE_LICENSEFUTUREISSUE - Licensing problem: time in the future.';
+    1835: sErrorMsgCurrent := 'ADSERR_DEVICE_LICENSETIMETOLONG - License period too long.';
+    1836: sErrorMsgCurrent := 'ADSERR_DEVICE_EXCEPTION - Exception at system startup.';
+    1837: sErrorMsgCurrent := 'ADSERR_DEVICE_LICENSEDUPLICATED - License file read twice.';
+    1838: sErrorMsgCurrent := 'ADSERR_DEVICE_SIGNATUREINVALID - Invalid signature.';
+    1839: sErrorMsgCurrent := 'ADSERR_DEVICE_CERTIFICATEINVALID - Invalid certificate.';
+    1840: sErrorMsgCurrent := 'ADSERR_DEVICE_LICENSEOEMNOTFOUND - Public key not known from OEM.';
+    1841: sErrorMsgCurrent := 'ADSERR_DEVICE_LICENSERESTRICTED - License not valid for this system ID.';
+    1842: sErrorMsgCurrent := 'ADSERR_DEVICE_LICENSEDEMODENIED - Demo license prohibited.';
+    1843: sErrorMsgCurrent := 'ADSERR_DEVICE_INVALIDFNCID - Invalid function ID.';
+    1844: sErrorMsgCurrent := 'ADSERR_DEVICE_OUTOFRANGE - Outside the valid range.';
+    1845: sErrorMsgCurrent := 'ADSERR_DEVICE_INVALIDALIGNMENT - Invalid alignment.';
+    1846: sErrorMsgCurrent := 'ADSERR_DEVICE_LICENSEPLATFORM - Invalid platform level.';
+    1847: sErrorMsgCurrent := 'ADSERR_DEVICE_FORWARD_PL - Context - forward to passive level.';
+    1848: sErrorMsgCurrent := 'ADSERR_DEVICE_FORWARD_DL - Context - forward to dispatch level.';
+    1849: sErrorMsgCurrent := 'ADSERR_DEVICE_FORWARD_RT - Context - forward to real-time.';
 
     ELSE
-    sErrorMessage := 'Unknown ADS error code.';
+    sErrorMsgCurrent := 'Unknown ADS error code.';
 END_CASE
+
+// --- Latched error handling -------------------------------------------------
+// bDevError is set-only: a new fbsetSlaveState error latches it, and only the
+// rising edge of bAcknowledge, taken from a known-safe state (no state request
+// in flight and no command pending), clears it together with its message.
+// Nothing else in this block may clear bDevError.
+rtSetStateError(CLK:= fbsetSlaveState.bError);
+rtAcknowledge(CLK:= bAcknowledge);
+bAckAllowed := rtAcknowledge.Q AND NOT fbsetSlaveState.bBusy AND NOT bCmdReqState;
+
+bDevError S= rtSetStateError.Q;
+bDevError R= bAckAllowed;
+
+IF bAckAllowed THEN
+    sErrorMessage := ''; // Drop the message of the acknowledged fault
+ELSIF rtSetStateError.Q THEN
+    sErrorMessage := sErrorMsgCurrent; // Keep the message of the latched fault
+END_IF
 
 IF fbgetStatusTimer.Q THEN
      fbgetStatusTimer.IN := FALSE; // reset timer

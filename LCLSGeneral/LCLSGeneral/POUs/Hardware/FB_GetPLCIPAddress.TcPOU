@@ -4,13 +4,14 @@
     <Declaration><![CDATA[FUNCTION_BLOCK FB_GetPLCIPAddress
 VAR_INPUT
     bEnable			: BOOL;
+    bAcknowledge	: BOOL; // Rising edge clears the latched bError when no request is in flight
     tRetryDelay		: TIME := T#10s;
 END_VAR
 VAR_OUTPUT
     sIPAddress		: STRING(15);
 
     bDone 			: BOOL;
-    bError			: BOOL;
+    bError			: BOOL; // Latched error: set-only until bAcknowledge clears it
 END_VAR
 VAR
     fbGetAdapterIP 	: FB_GetAdaptersInfo := (bExecute := TRUE, sNetID := ''); // Acquire IP of the correct adapter
@@ -20,6 +21,10 @@ VAR
     tRetry 			: TON;
     bReset			: BOOL;
     bInitialized	: BOOL := FALSE;
+
+    rtAcknowledge	: R_TRIG; // Detects the rising edge of bAcknowledge
+    rtAdapterError	: R_TRIG; // Detects a new error from fbGetAdapterIP
+    bAckAllowed		: BOOL; // TRUE on the scan in which an acknowledge is honoured
 
 END_VAR
 ]]></Declaration>
@@ -35,7 +40,7 @@ END_VAR
     bReset := FALSE;
 
     IF NOT bDone THEN
-        fbGetAdapterIP(bExecute:=TRUE, bError=>bError);
+        fbGetAdapterIP(bExecute:=TRUE);
         IF NOT (fbGetAdapterIP.bBusy or fbGetAdapterIP.bError) THEN
             FOR iIndex := 0 TO MAX_LOCAL_ADAPTERS DO
                 IF FIND(fbGetAdapterIP.arrAdapters[iIndex].sIpAddr, GVL_Logger.sIpTidbit) <> 0 THEN
@@ -47,7 +52,18 @@ END_VAR
         END_IF
     END_IF
 
-END_IF]]></ST>
+END_IF
+
+// --- Latched error handling -------------------------------------------------
+// bError is set-only: a new fbGetAdapterIP error latches it, and only the rising
+// edge of bAcknowledge, taken from a known-safe state (no adapter request in
+// flight), clears it again. Nothing else in this block may clear bError.
+rtAdapterError(CLK:= fbGetAdapterIP.bError);
+rtAcknowledge(CLK:= bAcknowledge);
+bAckAllowed := rtAcknowledge.Q AND NOT fbGetAdapterIP.bBusy;
+
+bError S= rtAdapterError.Q;
+bError R= bAckAllowed;]]></ST>
     </Implementation>
   </POU>
 </TcPlcObject>

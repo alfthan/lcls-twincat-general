@@ -8,17 +8,21 @@ VAR_INPUT
     nSlaveAddr      : UINT;
     bEnable 	    : BOOL;
     nMaxErrorCount  : INT := 5; // Stop Trying to Change state after this many tries
+    bAcknowledge    : BOOL; // Rising edge clears the latched bError when no state request is in flight
 END_VAR
 VAR_IN_OUT
 END_VAR
 VAR_OUTPUT
-    bError 		: BOOL;
+    bError 		: BOOL; // Latched error: set-only until bAcknowledge clears it
     nErrorId	: UDINT;
 END_VAR
 VAR
     nStateMachineState      : INT := 1;
     nErrorCount             : INT := 0;
     bStopTrying             : BOOL;
+    bStateMachineError      : BOOL; // Fault condition the StateMachine reports for this scan
+    bAckAllowed             : BOOL; // TRUE on the scan in which an acknowledge is honoured
+    rtAcknowledge           : R_TRIG; // Detects the rising edge of bAcknowledge
 
     fbgetSlaveState         : FB_EcGetSlaveState;
     fbsetSlaveState         : FB_EcSetSlaveState;
@@ -40,7 +44,7 @@ StateMachine(bEnable:=bEnable,
     bSetNextState=> fbsetSlaveState.bExecute,
     bfbSetBusy := fbsetSlaveState.bBusy,
     bfbSetError := fbsetSlaveState.bError,
-    bError => bError);
+    bErrorCondition => bStateMachineError);
 
 fbgetSlaveState(sNetId:= sNetId, nSlaveAddr:= nSlaveAddr);
 fbsetSlaveState(sNetId:=sNetId, nSlaveAddr:=nSlaveAddr, tTimeout:=T#5s);
@@ -49,18 +53,36 @@ IF bLog THEN
     fbLogger(sMsg:=sLogMessage, eSevr:=TcEventSeverity.Info);
 END_IF
 
-IF bError OR bStopTrying THEN
-    bError := TRUE;
+// --- Latched error handling -------------------------------------------------
+// bError is set-only: any get/set error reported by the state machine or the
+// sub-blocks, or the retry-stop condition, latches it. Nothing in the state
+// machine and no sub-block error dropping back to FALSE may clear it; only an
+// acknowledged request from a known-safe state clears it.
+bError S= bStateMachineError OR fbgetSlaveState.bError OR fbsetSlaveState.bError OR bStopTrying;
+
+// Keep the error id of the live fault available for diagnostics.
+IF bError THEN
     IF fbgetSlaveState.bError OR bStopTrying THEN
-           nErrorId := fbgetSlaveState.nErrId;
-    ELSIF fbsetSlaveState.bError OR bStopTrying THEN
+        nErrorId := fbgetSlaveState.nErrId;
+    ELSIF fbsetSlaveState.bError THEN
         nErrorId := fbsetSlaveState.nErrId;
     END_IF
-ELSE
-    bError := FALSE;
-    nErrorId := 0 ;
 END_IF
 
+// Acknowledge: only on the rising edge of bAcknowledge, and only from a known
+// safe state, i.e. with no get or set request in flight. The retry bookkeeping
+// is re-armed so the block tries the state change again; a fault that is still
+// present latches the error anew.
+rtAcknowledge(CLK:= bAcknowledge);
+bAckAllowed := rtAcknowledge.Q AND NOT fbgetSlaveState.bBusy AND NOT fbsetSlaveState.bBusy;
+
+bError R= bAckAllowed;
+
+IF bAckAllowed THEN
+    nErrorId := 0;
+    nErrorCount := 0;
+    bStopTrying := FALSE;
+END_IF
 ]]></ST>
     </Implementation>
     <Method Name="StateMachine" Id="{4f307c1c-6406-4ed4-adea-e4e6e46fd62f}">
@@ -84,12 +106,14 @@ VAR_OUTPUT
 
     sLogMessage             : T_MaxString;
     bLog                    : BOOL;
-    bError					: BOOL;
+    bErrorCondition : BOOL; // Fault condition for this scan, latched by the FB
 END_VAR
 
 ]]></Declaration>
       <Implementation>
         <ST><![CDATA[
+bErrorCondition := FALSE; // No fault unless a state below reports one
+
 CASE nStateMachineState OF
     0 :
         nErrorCount := 0;
@@ -113,7 +137,7 @@ CASE nStateMachineState OF
         END_IF
 
         IF bfbGetError THEN
-            bError := TRUE;
+            bErrorCondition := TRUE;
             nStateMachineState := 3;
         ELSE
             // Only Try to Update when We have good state reading.
@@ -127,7 +151,6 @@ CASE nStateMachineState OF
                 nNextState := nCurretState;
                 nErrorCount := 0;
                 bStopTrying := FALSE;
-                bError := FALSE;
             END_IF
         END_IF
 
@@ -159,7 +182,7 @@ CASE nStateMachineState OF
       3 : // Wait to Finish Trying to Move to Next State
 
          IF bfbSetError OR bfbGetError THEN
-            bError := TRUE;
+            bErrorCondition := TRUE;
             nErrorCount := nErrorCount + 1;
             IF nErrorCount = nMaxErrorCount THEN
                 bStopTrying := TRUE;
