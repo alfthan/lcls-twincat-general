@@ -3,8 +3,71 @@
   <POU Name="FB_AnalogInput" Id="{c3bf2f11-e399-406d-ba95-ae8960e90a27}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_AnalogInput
 (*
-    Converts the integer from an analog input terminal to a real unit value (e.g., volts)
-    2019-10-09 Zachary Lentz
+    Purpose:
+        Converts the raw integer read from one analog input terminal channel
+        into an engineering-unit value: the counts are mapped onto the
+        terminal's own range (fTermMin..fTermMax, e.g. 0..10 V), then scaled
+        by fResolution and shifted by fOffset into the unit the field device
+        reports (e.g. bar, psi, degC, mm).
+
+    Usage:
+        Declare one instance per channel, bind iRaw to the terminal's input
+        word and configure the conversion per sensor:
+
+            fbPressure(
+                iRaw        := iPressureRaw,  // AT %I* of the EL3xxx channel
+                iTermBits   := 15,            // terminal full scale 2^15-1
+                fTermMax    := 10.0,          // terminal range 0..10 V
+                fTermMin    := 0.0,           // terminal range 0 V
+                fResolution := 10.0,          // 100 bar sensor -> 10 bar/V
+                fOffset     := 0.0);          // sensor reads 0 bar at 0 V
+            fPressureBar := fbPressure.fReal;
+
+        The conversion performed is
+
+            fReal := (iRaw / fScale + fTermMin) * fResolution + fOffset
+
+        with fScale = (2^iTermBits - 1) / (fTermMax - fTermMin). fScale is
+        computed once, on the first call that sees fTermMax > fTermMin, and
+        then cached for the life of the instance, so a later change of the
+        terminal range is ignored: re-create the instance when the range
+        changes.
+
+        When the range is not usable (fTermMax <= fTermMin) fScale stays 0
+        and fReal is not written, so a mis-configured channel holds its
+        previous value instead of producing a plausible new one.
+
+        fResolution and fOffset are published to EPICS (RES / OFF, io: io) and
+        may be retuned at run time; both act on the engineering-unit result
+        only and leave the raw-to-terminal mapping untouched.
+
+    Objectives:
+        - Give every analog channel a single documented place to state its
+          terminal range and its sensor conversion, so the scale - and hence
+          the unit of the reading - is reviewable instead of being re-derived
+          at each call site.
+        - Keep the block generic: voltage, current and ratiometric
+          transmitters are all served by configuration only.
+        - Make the two free parameters, fResolution and fOffset, explicit in
+          meaning, unit and range (see their declaration comments), so a wrong
+          scale or a forgotten tare shows up as a documented deviation rather
+          than as a silently wrong reading.
+
+    History:
+        2019-09-20  Zachary Lentz: created as one of the utility FBs (7575c97).
+        2019-10-09  Zachary Lentz: expanded the docstring and input comments
+                    (098928c).
+        2023-08-18  nwaters: added fResolution and fOffset to the conversion
+                    (e59efe0), then defaulted fResolution to 1 because 0.1
+                    scaled channels that expected no scaling (beb2d4c).
+        2025-01-25  KaushikMalapati: iRaw INT -> DINT for 32-bit terminals
+                    (f016a00).
+        2026-11-27  Scirix Agent: added this header and the fResolution,
+                    fOffset and fScale comments; comment only, no behaviour
+                    change (audit finding #810, convention conv_321640e095c0).
+
+    Author/Date:
+        2019-09-20  Zachary Lentz
 *)
 VAR_INPUT
     // Connect this input to the terminal
@@ -15,12 +78,22 @@ VAR_INPUT
     fTermMax: LREAL;
     // The fReal value correlated with the terminal's min value
     fTermMin: LREAL;
-    // Value to scale the end result to
+    // Scale factor from terminal units to engineering units, in engineering
+    // units per terminal unit (e.g. 10 bar/V for a 0..100 bar sensor on a
+    // 0..10 V terminal). The terminal-range value (iRaw / fScale + fTermMin)
+    // is multiplied by it, so the default 1 leaves fReal in terminal units
+    // (V, mA). Range: any non-zero factor; the sign sets the sensor
+    // direction (0 collapses fReal to fOffset).
     {attribute 'pytmc' := '
         pv: RES
         io: io
     '}
     fResolution : LREAL := 1;
+    // Offset added after fResolution, in the same engineering unit as fReal.
+    // Removes a residual reading at the sensor's zero point (tare), e.g. the
+    // 0.3 bar a pressure transmitter reads at atmosphere. Range: the sensor's
+    // own zero error, typically a few percent of its span. It shifts every
+    // reading equally, so it corrects zero, not gain.
     {attribute 'pytmc' := '
         pv: OFF
         io: io
@@ -29,6 +102,8 @@ VAR_INPUT
 END_VAR
 VAR_OUTPUT
     // The real value read from the output
+    // Result in engineering units: (iRaw / fScale + fTermMin) * fResolution
+    // + fOffset. Holds its previous value while fScale is 0.
     {attribute 'pytmc' := '
         pv: VAL
         io: i
@@ -36,6 +111,8 @@ VAR_OUTPUT
     fReal: LREAL;
 END_VAR
 VAR
+    // Counts per terminal unit, derived from iTermBits and the terminal range
+    // on the first call; 0 while the range is unusable (fTermMax <= fTermMin).
     fScale: LREAL;
 END_VAR]]></Declaration>
     <Implementation>
