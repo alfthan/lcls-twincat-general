@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1">
   <POU Name="FB_UnixTimeStampGlobal" Id="{626742ce-ebb0-42d8-8b96-83167f2ea362}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_UnixTimeStampGlobal
@@ -19,7 +19,7 @@ END_VAR
     <Implementation>
       <ST><![CDATA[fbTimeStamp(
     bExecute := bExecute,
-    fTime => DefaultGlobals.fTimeStamp);]]></ST>
+    fTime => DefaultGlobals_GVL.fTimeStamp);]]></ST>
     </Implementation>
   </POU>
 </TcPlcObject>
