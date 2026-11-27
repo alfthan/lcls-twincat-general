@@ -2,7 +2,54 @@
 <TcPlcObject Version="1.1.0.1">
   <POU Name="FB_EPS" Id="{0c78cf58-96ea-4c52-b0ca-64b7290d1ef9}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_EPS
+(*
+    Purpose:
+        Sole writer of one EPS (equipment protection system) flag interface. Wraps a
+        DUT_EPS structure and exposes one method per field, so the derived
+        "all flags true" state (DUT_EPS.bEPS_OK) can never drift from the flag word
+        (DUT_EPS.nFlags).
+
+    Usage:
+        Declare an instance next to the interface structure and bind the reference
+        before calling any method:
+
+            fbEPS(eps := aPortEPS[i].stEPS);
+            fbEPS.setBit(nBits := 0, bValue := someConditionOk);
+            IF NOT aPortEPS[i].stEPS.bEPS_OK THEN
+                // at least one EPS flag is raised
+            END_IF
+
+        eps is a VAR_IN_OUT reference, not a copy: every method reads and writes the
+        caller's DUT_EPS directly. The reference must be assigned (REF=) before use;
+        each method tests __ISVALIDREF(eps) and returns immediately, leaving the
+        structure untouched, while the reference is not (yet) valid.
+
+        Bit numbering: nBits is the zero-based bit index into eps.nFlags, 0 = least
+        significant bit, valid range 0..31 (nFlags is a UDINT). eps.nFlags starts at
+        16#FFFFFFFF (every flag TRUE = no EPS condition) and setBit recomputes
+        eps.bEPS_OK as "all 32 bits are TRUE".
+
+        The methods are declared BOOL but do not currently assign a return value:
+        read the result from the eps structure (the addressed bit or bEPS_OK), never
+        from the method return value.
+
+    Objectives:
+        - Keep nFlags, bEPS_OK and the flag texts consistent by having one writer.
+        - Give HMI/EPICS and test code one documented way to drive the flag word.
+        - Make the meaning and units of every declaration explicit for callers and
+          maintainers.
+
+    History:
+        J. Zamudio  2023-02-27  Created FB_EPS and DUT_EPS
+        J. Zamudio  2023-02-28  Documented sFlagDesc, removed the redundant EPS PV
+                                prefix, fixed the nMask inconsistency
+        ysmandza    2025-02-11  Pre-commit formatting clean-up
+        Agent       2026-11-27  Added POU/method headers and declaration comments
+*)
 VAR_IN_OUT
+    // EPS flag interface under control. Must be assigned (REF=) before any method
+    // call; each method guards itself with __ISVALIDREF(eps) and does nothing when
+    // the reference is invalid.
     eps : DUT_EPS;
 END_VAR
 VAR_OUTPUT
@@ -15,12 +62,38 @@ END_VAR
     </Implementation>
     <Method Name="setBit" Id="{243035d2-b889-46d7-b89e-610b76586068}">
       <Declaration><![CDATA[METHOD setBit : BOOL
+(*
+    Purpose:
+        Write a single flag bit of eps.nFlags and refresh eps.bEPS_OK from the
+        resulting flag word.
+
+    Usage:
+        fbEPS.setBit(nBits := 3, bValue := FALSE);   // raise (clear) flag 3
+        Call only after the eps reference has been bound to a DUT_EPS. The addressed
+        bit is written only when its current value differs from bValue. The return
+        value is unused; inspect eps.nFlags / eps.bEPS_OK afterwards.
+
+    Objectives:
+        Own the nFlags <-> bEPS_OK relationship in one place so callers cannot leave
+        the two inconsistent.
+
+    History:
+        J. Zamudio  2023-02-27  Created
+        Agent       2026-11-27  Added header and declaration comments
+*)
 VAR_INPUT
+    // Zero-based bit index into eps.nFlags: 0 = least significant bit, valid range
+    // 0..31 (eps.nFlags is a 32-bit UDINT).
     nBits : BYTE;
+    // Bit value to write: TRUE = flag good/condition satisfied, FALSE = flag raised.
     bValue : BOOL;
 END_VAR
 VAR
+    // Bit mask for the bit selected by nBits (built with SHL from the previous
+    // value). Retained between calls, so it is shifted again on every call: use a
+    // stable nBits per FB instance.
     nMask : UDINT := 1;
+    // Value (0 or 1) read back from the addressed bit before it is written.
     nBitValue : UDINT := 0;
 END_VAR
 ]]></Declaration>
@@ -49,7 +122,28 @@ END_IF
     </Method>
     <Method Name="setDescription" Id="{84797ad0-c375-4675-8998-ec2e912fbbdd}">
       <Declaration><![CDATA[METHOD setDescription : BOOL
+(*
+    Purpose:
+        Store the human-readable description of the bits in eps.nFlags.
+
+    Usage:
+        fbEPS.setDescription(desciption := 'Port 1;Port 2;Port 3');
+        The text is copied verbatim into eps.sFlagDesc, from where EPICS publishes it
+        (DUT_EPS.sFlagDesc) as a semicolon-delimited list of flag names. The return
+        value is unused; read eps.sFlagDesc afterwards.
+
+    Objectives:
+        Let the EPS producer label its flag word once instead of hard-coding the
+        names in the consumer or in the IOC.
+
+    History:
+        J. Zamudio  2023-02-27  Created
+        Agent       2026-11-27  Added header and declaration comments
+*)
 VAR_INPUT
+    // Semicolon-delimited description of the nFlags bits, copied to eps.sFlagDesc.
+    // The parameter keeps its historical misspelling 'desciption' so existing named
+    // callers and the exported library interface stay compatible.
     desciption : STRING;
 END_VAR
 ]]></Declaration>
@@ -66,7 +160,25 @@ eps.sFlagDesc := desciption;]]></ST>
     </Method>
     <Method Name="setMessage" Id="{50553b5a-8e8e-441f-8a78-c5cb5c67e718}">
       <Declaration><![CDATA[METHOD setMessage : BOOL
+(*
+    Purpose:
+        Store the text that identifies this EPS interface in log messages.
+
+    Usage:
+        fbEPS.setMessage(message := 'VICI port 2 EPS');
+        The text is copied verbatim into eps.sMessage, from where EPICS publishes it
+        (DUT_EPS.sMessage). The return value is unused; read eps.sMessage afterwards.
+
+    Objectives:
+        Keep the operator-facing name of the interface with the interface itself
+        rather than in each consumer's logging code.
+
+    History:
+        J. Zamudio  2023-02-27  Created
+        Agent       2026-11-27  Added header and declaration comments
+*)
 VAR_INPUT
+    // Text used to name this EPS in log messages, copied to eps.sMessage.
     message : STRING;
 END_VAR
 ]]></Declaration>
