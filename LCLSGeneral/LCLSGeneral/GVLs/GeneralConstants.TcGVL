@@ -9,6 +9,10 @@ VAR_GLOBAL CONSTANT
     // You can make this smaller if you want to use less memory in your program in exchange for limiting your max state count
     // You can make this larger if you want to use states-based FBs sized beyond the EPICS enum limit
     MAX_STATES: UINT := 15;
+    // Number of diagnostic messages a ST_FbDiagnostics buffer holds
+    // (size of ST_FbDiagnostics.asResults and the upper limit of its resultIdx)
+    // Change this once to resize the buffer and the index clamp together
+    MAX_DIAGNOSTIC_MESSAGES: UINT := 20;
 END_VAR
 ]]></Declaration>
   </GVL>

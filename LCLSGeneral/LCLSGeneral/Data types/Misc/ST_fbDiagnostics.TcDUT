@@ -2,14 +2,16 @@
 <TcPlcObject Version="1.1.0.1">
   <DUT Name="ST_FbDiagnostics" Id="{07dcfd66-d6ab-4320-bb04-7a16ac42f205}">
     <Declaration><![CDATA[//Stuff to log messages within function blocks
+//The buffer size is set once in GeneralConstants.MAX_DIAGNOSTIC_MESSAGES, which sizes
+//asResults and clamps resultIdx together so the two can never drift apart.
 TYPE ST_FbDiagnostics :
 STRUCT
-    asResults	:	ARRAY [1..20] OF T_MaxString; //Diagnostic messages, use to record state changes or other important events.
+    asResults	:	ARRAY [1..GeneralConstants.MAX_DIAGNOSTIC_MESSAGES] OF T_MaxString; //Diagnostic messages, use to record state changes or other important events.
     {attribute 'naming' := 'omit'}
     //Incrementer, included here to facilitate using asResults
     resultIdx	:	FB_Index := (
         LowerLimit := 1,
-        UpperLimit := 20
+        UpperLimit := GeneralConstants.MAX_DIAGNOSTIC_MESSAGES
     );
     {attribute 'naming' := 'omit'}
     fString	:	FB_FormatString; //Use to create good log messages, similar to C++ fstring
