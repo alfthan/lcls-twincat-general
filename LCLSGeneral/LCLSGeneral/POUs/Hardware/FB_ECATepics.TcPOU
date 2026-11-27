@@ -2,27 +2,64 @@
 <TcPlcObject Version="1.1.0.1">
   <POU Name="FB_ECATepics" Id="{38ed9c12-1d10-4e74-8cdb-42be0630d47c}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_ECATepics
+(*
+    Publishes one EtherCAT slave (terminal) to EPICS and lets the operator
+    request an EtherCAT state transition for that slave.
+
+    Purpose:
+        Wraps the Beckhoff blocks FB_EcGetSlaveState / FB_EcSetSlaveState so that
+        a single slave's device state is exposed as EPICS records, a state can be
+        requested from EPICS, and ADS failures are decoded into readable text.
+
+    Usage:
+        Declare one instance per slave in a program. Connect sNetId to the AMS
+        NetId of the EtherCAT master and nSlaveAddr to the slave's EtherCAT
+        address. Leave bInit at TRUE so that sDeviceDesc is copied to sDevDesc on
+        the first scan. Write the wanted state to eReqState and set bCmdReqState
+        to TRUE to send it; read eDevState, bDevError and sErrorMessage for
+        status. No outputs are declared: every status value is a VAR carrying a
+        pytmc pragma, so it appears in the generated IOC.
+
+    Objectives:
+        - Report the live device state of the slave, polled at 2 Hz (500 ms).
+        - Drive a requested state transition through FB_EcSetSlaveState.
+        - Signal a failed request via bDevError and decoded ADS error text.
+
+    History:
+        2026-09-08 Josue Zamudio       - created.
+        2026-11-27 Documentation pass  - added this header and the declaration
+                                         comments (audit finding #101).
+*)
 VAR_INPUT
+    // AMS NetId of the EtherCAT master that owns the slave, e.g. '192.168.1.10.2.1'.
     sNetId          : T_AmsNetId;
+    // EtherCAT address of the slave within the master's ring (the terminal's configured address).
     nSlaveAddr      : UINT;
+    // Description of the terminal, e.g. 'TERM 3'. Copied to sDevDesc on the first scan.
     sDeviceDesc		: T_MaxString := 'TERM #';
 END_VAR
 VAR_OUTPUT
+    // No outputs are declared: all status lives in the VAR section below, tagged for pytmc.
 END_VAR
 VAR
 
+    // Operator command: set TRUE to issue the state request held in eReqState.
+    // Cleared by the block once the request completes or fails, so it is not re-issued.
     {attribute 'pytmc' := '
         pv: bCmdReqState
     '}
 
     bCmdReqState : BOOL;
 
+    // EtherCAT state wanted for the slave, written from EPICS.
     {attribute 'pytmc' := '
         pv: eReqState
     '}
     eReqState : E_ECAT_STATES;
+    // Copy of eReqState taken on the first scan, before any request is issued.
     ePrevReqState : E_ECAT_STATES;
 
+    // Live EtherCAT device state of the slave, polled every 500 ms (EPICS output).
     {attribute 'pytmc' := '
         pv: eDevState
         io: o
@@ -35,27 +72,35 @@ VAR
     '}
     eDevState : E_ECAT_STATES;
 
+    // TRUE when the last state request to the slave failed (EPICS output).
     {attribute 'pytmc' := '
         pv: bError
         io: o
     '}
     bDevError : BOOL;
 
+    // Decoded ADS error text for bDevError; empty when the request succeeded.
     {attribute 'pytmc' := '
         pv: sErrorMessage
         io: o
     '}
     sErrorMessage : STRING;
 
+    // Terminal description published to EPICS; initialised from sDeviceDesc.
     {attribute 'pytmc' := '
         pv: sDESC
         io: io
     '}
     sDevDesc : STRING;
 
+    // Beckhoff ADS block that requests a new EtherCAT state for the slave.
     fbsetSlaveState         : FB_EcSetSlaveState;
+    // Beckhoff ADS block that reads the current EtherCAT state of the slave.
     fbgetSlaveState			: FB_EcGetSlaveState;
+    // 500 ms poll timer that paces the state reads (2 Hz).
     fbgetStatusTimer : TON;
+    // First-scan flag: copies sDeviceDesc to sDevDesc and starts the poll timer,
+    // then clears itself so the initialisation runs exactly once.
     bInit : BOOL := TRUE;
 
 END_VAR
