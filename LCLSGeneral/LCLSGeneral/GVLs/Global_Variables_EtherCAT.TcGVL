@@ -5,6 +5,9 @@
 VAR_GLOBAL CONSTANT
     iSLAVEADDR_ARR_SIZE	: UINT := 256;
     ESC_MAX_PORTS : UINT := 3; // Maximum number of ports (4) on ESC
+    // EtherCAT State word: the ESM (EtherCAT State Machine) state occupies the low nibble,
+    // the bits above it carry error flags. Mask the state field before comparing/interpreting it.
+    ECAT_STATE_MASK : WORD := 16#000F;
 END_VAR
 ]]></Declaration>
   </GVL>
