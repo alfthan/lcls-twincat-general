@@ -3,15 +3,54 @@
   <POU Name="FB_TimeStampBuffer" Id="{b2db97ec-7312-4822-a3b4-76ec1968b59f}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_TimeStampBuffer
 (*
-    A Companion to FB_LREALBuffer that accumulates timestamps
-    2019-10-09 Zachary Lentz
+    Companion to FB_LREALBuffer: accumulates one wall-clock timestamp per sample.
+
+    Purpose:
+        Samples the PLC's Unix time on every cycle where bExecute is TRUE and
+        collects the samples into a fixed-size block, so that a consumer can
+        retrieve a whole block of timestamps in a single read. Drive it from the
+        same bExecute as a FB_LREALBuffer instance to obtain a matched pair of a
+        value block and a timestamp block.
+
+    Usage:
+        Call the block once per PLC cycle - not conditionally - so that the
+        internal buffer index stays in step with the samples taken:
+
+            fbTimeStamps : FB_TimeStampBuffer;
+
+            fbTimeStamps(bExecute := bAcquire);
+
+        While bNewArray is FALSE, arrOutput holds the last completed block and
+        may be read at any time. bNewArray pulses TRUE for a single cycle when a
+        new block has been copied into arrOutput; a consumer that must see every
+        block latches its copy on that edge.
+
+    Objectives:
+        - Fill the timestamp block without ever blocking the PLC cycle: each call
+          stores at most one sample.
+        - Keep the output interface identical to FB_LREALBuffer so that the value
+          block and the timestamp block line up element for element.
+        - Report readiness explicitly via bNewArray instead of requiring the
+          consumer to track the sample count itself.
+
+    History:
+        2019-10-09 Zachary Lentz  - Original version.
+        2026-11-27 Audit finding  - Completed the header (usage/objectives/
+                                    history) and documented arrOutput and
+                                    bNewArray.
 *)
 VAR_INPUT
     // If TRUE, we'll accumulate a value on this cycle.
     bExecute: BOOL;
 END_VAR
 VAR_OUTPUT
+    // Block of the 1000 most recently collected timestamps, in units of seconds
+    // since 1970-01-01 00:00:00 UTC (Unix time; fractional part is milliseconds).
+    // Refreshed as a whole only once the block has been filled; between
+    // refreshes it still holds the previously completed block.
     arrOutput: ARRAY [1..1000] OF LREAL;
+    // TRUE for exactly one cycle, on the cycle where a full block of 1000
+    // timestamps has been copied into arrOutput. FALSE at all other times.
     bNewArray: BOOL;
 END_VAR
 VAR
