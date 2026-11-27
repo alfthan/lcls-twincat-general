@@ -4,6 +4,16 @@
     <Declaration><![CDATA[(*
     EPICS AreaDetector Stats Plugin Centroid Monitor
 
+    Purpose:
+
+        Mirror the centroid values (`CentroidX_RBV`, `CentroidY_RBV`) and the
+        frame counter (`ArrayCounter_RBV`) of an EPICS AreaDetector stats plugin
+        into the PLC, and report whether that data is both healthy (`bValid`) and
+        actually moving from frame to frame (`bIsUpdating`). The block owns the
+        EPICS link monitoring, the frame-acceptance logic and the frame-time
+        measurement, so a PLC program only has to read four values and two
+        flags.
+
     Requirements:
 
     * Requires an existing IOC with an EPICS AreaDetector.
@@ -84,14 +94,58 @@
     - Frame time below fMaximumFrameTime
     - Centroid X and Y values above fMinimumValidChange
 
+    Objectives:
+
+        - Give every detector one block that owns its EPICS link handling, so
+          control logic never reads raw link records itself.
+        - Never present stale or alarming centroid data as good: `bValid`
+          follows the three link severities and the link refresh timeouts of
+          `FB_LREALFromEPICS`.
+        - Never present a stalled or unresponsive detector as updating:
+          `bIsUpdating` additionally requires a frame newer than
+          `fMaximumFrameTime` and a centroid change of at least
+          `fMinimumValidChange`.
+
+    History:
+
+        2022-03-09  K Lauer: created the function block together with its test
+                    (5933421, 6546dbe).
+        2022-03-10  Ken Lauer: documented the block and explained the two change
+                    thresholds in this header (f185d6b).
+        2023-05-22  Jakob Sagatowski: dropped the ProductVersion attribute from
+                    the .TcPOU XML header, no code change (2766f0d).
+        2026-11-27  Scirix Agent: added the purpose/objectives/history/author
+                    sections and gave every input, output and internal
+                    declaration an inline comment with its meaning and units;
+                    comment only, no behaviour change (audit finding #73,
+                    convention conv_321640e095c0).
+
+    Author/Date:
+
+        2022-03-09  K Lauer
+
 *)
 FUNCTION_BLOCK FB_EpicsCentroidMonitor
 VAR_INPUT
+    // Maximum allowed time between two accepted frames [s]. A frame that takes
+    // longer than this leaves `bIsUpdating` FALSE. Default 0.2 s (5 Hz).
     fMaximumFrameTime : LREAL := 0.2;
-    (* Minimum change to be considered updating correctly - buggy detectors may need this. *)
+    // Minimum change of the centroid X and Y values [pixels] between two
+    // accepted frames for the detector to count as genuinely updating. A buggy
+    // detector that bumps the array counter but returns an unchanged centroid
+    // stays below this and reports `bIsUpdating` = FALSE. Default 1E-6 px,
+    // which any real change passes.
     fMinimumValidChange : LREAL := 1E-6;
-    (* Minimum change in pixels to be considered a new value for X, Y *)
+    // Minimum change of the centroid X and Y values [pixels] for a new array
+    // count to be accepted as a new frame. Works around the array counter and
+    // the centroid values not arriving in one atomic write (see header), and
+    // makes a black/white/stale image read as "no new frame". Default 1E-6 px,
+    // which any real change passes.
     fNewFrameMinimumChange : LREAL := 1E-6;
+    // Master enable [BOOL]. TRUE: the monitor runs. FALSE: `bValid` is forced
+    // FALSE and the block returns before calling its EPICS link blocks or the
+    // frame logic, so `bIsUpdating`, the centroid values and `fFrameTime` keep
+    // their last values. Default TRUE.
     bEnable : BOOL := TRUE;
 END_VAR
 VAR_OUTPUT
@@ -99,22 +153,41 @@ VAR_OUTPUT
         pv: IsUpdating
         io: input
     '}
+    // TRUE while the detector delivers fresh centroid data at a usable rate:
+    // at least one frame has been accepted since start-up, `fFrameTime` is
+    // <= `fMaximumFrameTime`, and the last accepted frame's X and Y change was
+    // >= `fMinimumValidChange`. Distinct from `bValid`, which only reports the
+    // health of the three EPICS links: a healthy but stalled detector gives
+    // `bValid` = TRUE and `bIsUpdating` = FALSE.
     bIsUpdating : BOOL;
     {attribute 'pytmc' := '
         pv: CentroidX
         io: input
     '}
+    // Last centroid X position reported by the stats plugin [pixels], in the
+    // plugin's own pixel coordinate system; no scaling is applied by this
+    // block. Not reset when the data is invalid.
     fCentroidX : LREAL;
     {attribute 'pytmc' := '
         pv: CentroidY
         io: input
     '}
+    // Last centroid Y position reported by the stats plugin [pixels], same
+    // units and scaling rules as `fCentroidX`.
     fCentroidY : LREAL;
     {attribute 'pytmc' := '
         pv: ArrayCount
         io: input
     '}
+    // Array counter of the stats plugin [frames]: number of arrays acquired
+    // since the counter was last reset. Converted from the linked LREAL to
+    // UDINT as an integer count, so any fractional part is lost.
     nArrayCount : UDINT;
+    // TRUE while all three EPICS links (centroid X, centroid Y, array counter)
+    // are healthy, i.e. each reports a severity <= `iMaximumValidSeverity`
+    // (default 1, so NO_ALARM and MINOR pass) and was refreshed within the
+    // `tTimeout` of `FB_LREALFromEPICS` (default 2 s). It says nothing about
+    // whether the numbers are changing - use `bIsUpdating` for that.
     bValid : BOOL;
     {attribute 'pytmc' := '
         pv: FrameTime
@@ -122,6 +195,9 @@ VAR_OUTPUT
         field: DESC Time between frame updates
         field: EGU sec
     '}
+    // Measured time between the last two accepted frames [s], computed on the
+    // PLC from the frame-accept timestamps. Seeded to 1000.0 s at start-up, so
+    // "no frame yet" cannot pass `fMaximumFrameTime`.
     fFrameTime : LREAL;
 END_VAR
 VAR
@@ -129,28 +205,38 @@ VAR
         pv: CX_
         link: CentroidX_RBV
     '}
+    // Pulls CentroidX_RBV into the PLC [pixels]; its `bValid` covers the link
+    // severity and refresh timeout of that one PV.
     fbCentroidX : FB_LREALFromEPICS;
 
     {attribute 'pytmc' := '
         pv: CY_
         link: CentroidY_RBV
     '}
+    // Pulls CentroidY_RBV into the PLC [pixels]; `bValid` as above.
     fbCentroidY : FB_LREALFromEPICS;
 
+    // Centroid X of the last accepted frame [pixels]; the reference that
+    // fNewFrameMinimumChange and fMinimumValidChange are measured against.
     fLastCentroidX : LREAL;
+    // Centroid Y of the last accepted frame [pixels]; same as fLastCentroidX.
     fLastCentroidY : LREAL;
 
     {attribute 'pytmc' := '
         pv: Cnt_
         link: ArrayCounter_RBV
     '}
+    // Pulls ArrayCounter_RBV into the PLC [frames]; `bValid` as above.
     fbArrayCounter : FB_LREALFromEPICS;
 
-    // Last array count value
+    // Last array count value that was accepted as a frame [frames]
     nLastArrayCount : UDINT;
-    // Time of the last frame update
+    // Time of the last frame update [PLC TIME, 1 ms base]; also seeded on the
+    // first cycle so the first frame time is measured from start-up.
     tLastUpdate: TIME;
 
+    // First-scan flag: TRUE once `tLastUpdate` and `fFrameTime` have been
+    // seeded by the initialisation branch.
     bInit : BOOL;
     // Did we see a frame update yet? (FALSE at startup; TRUE after first frame.)
     bSawFrame : BOOL;
