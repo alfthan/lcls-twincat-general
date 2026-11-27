@@ -13,10 +13,22 @@ VAR_INPUT
     bExecute: BOOL;
 END_VAR
 VAR_OUTPUT
+    // Rolling buffer holding the last 1000 accumulated timestamps, in units of
+    // seconds since the Unix epoch (resolution 1 ms), copied from
+    // DefaultGlobals.fTimeStamp.
+    // Ordering: oldest sample first; arrOutput[1] is the oldest value of the
+    // completed buffer and arrOutput[1000] is the most recently accumulated one.
+    // Semantics: only refreshed when the internal partial buffer fills, so the
+    // contents stay stale (previous batch) until bNewArray pulses TRUE.
     arrOutput: ARRAY [1..1000] OF LREAL;
+    // TRUE for exactly one cycle, on the cycle where arrOutput is refreshed (the
+    // internal 1000-element partial buffer just became full). FALSE all other
+    // cycles. Use as the handshake to copy or consume arrOutput.
     bNewArray: BOOL;
 END_VAR
 VAR
+    // Internal helper that accumulates one timestamp per cycle and hands over the
+    // completed 1000-element buffer.
     fbLREALBuffer: FB_LREALBuffer;
 END_VAR]]></Declaration>
     <Implementation>
