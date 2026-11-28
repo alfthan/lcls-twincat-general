@@ -3,6 +3,14 @@
   <POU Name="FB_ECATAutoRestart" Id="{7eb4a159-5b39-429e-b4d6-be42c06ba58e}" SpecialFunc="None">
     <Declaration><![CDATA[
 FUNCTION_BLOCK FB_ECATAutoRestart
+(*
+    Watches one EtherCAT slave and drives it back to OP when it falls out of OP.
+    The sequence is an explicit non-blocking state machine (monitor -> move -> wait).
+    Each transition requests one structured log event through bLog/sLogMessage, which the
+    body forwards to the shared logger (fbLogger); bLog is a single cycle pulse.
+    2026-11-28: reset bLog/sLogMessage at the start of every StateMachine call so the
+                 transition event is emitted once instead of on every PLC cycle.
+*)
 VAR_INPUT
     sNetId          : T_AmsNetId;
     nSlaveAddr      : UINT;
@@ -90,6 +98,12 @@ END_VAR
 ]]></Declaration>
       <Implementation>
         <ST><![CDATA[
+// Diagnostics: bLog is a one cycle pulse.  Clearing it (and the message it carries) on
+// entry means the state that requests a log records exactly one event per transition
+// instead of the caller re-emitting the retained flag on every PLC cycle.
+bLog := FALSE;
+sLogMessage := '';
+
 CASE nStateMachineState OF
     0 :
         nErrorCount := 0;

@@ -14,7 +14,7 @@ END_VAR
 ]]></Declaration>
     <Implementation>
       <ST><![CDATA[
-TestSingleLogPerTransitionExpect4Logs();
+TestSingleLogPerTransitionExpect3Logs();
 TestAnyStateExpectChangeToOpStateInSeq();
 TestNotEnabledExpectNoStateChange();
 Test5RetriesExpectErrorStopTrying();
@@ -275,8 +275,8 @@ TEST_FINISHED();
 ]]></ST>
       </Implementation>
     </Method>
-    <Method Name="TestSingleLogPerTransitionExpect4Logs" Id="{6bff341b-6186-4534-a454-b9503897cacd}">
-      <Declaration><![CDATA[METHOD TestSingleLogPerTransitionExpect4Logs
+    <Method Name="TestSingleLogPerTransitionExpect3Logs" Id="{6bff341b-6186-4534-a454-b9503897cacd}">
+      <Declaration><![CDATA[METHOD TestSingleLogPerTransitionExpect3Logs
 VAR_INPUT
 END_VAR
 
@@ -302,7 +302,7 @@ END_VAR
 ]]></Declaration>
       <Implementation>
         <ST><![CDATA[
-TEST('TestSingleLogPerTransitionExpect4Logs');
+TEST('TestSingleLogPerTransitionExpect3Logs');
 
 fbTON_TestTimer(IN:=bStartTest,PT:=T#1s);
 IF  NOT bStartTest THEN bStartTest := TRUE; END_IF
@@ -334,9 +334,9 @@ nCurretState := EC_DEVICE_STATE_INIT;
     END_IF
 END_FOR
 
-AssertEquals_INT(Expected:= 4,
+AssertEquals_INT(Expected:= 3,
     Actual:=nLogCount,
-    Message:='More than 4 Logs where Produced');
+    Message:='Expected one Log per state transition (3), not one per cycle');
 
 TEST_FINISHED();
 ]]></ST>
