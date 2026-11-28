@@ -282,6 +282,9 @@
     <Compile Include="POUs\Tests\FB_ECATAutoRestart_Test.TcPOU">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="POUs\Tests\FB_EPS_Test.TcPOU">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="POUs\Tests\FB_FlutterDetection_Test.TcPOU">
       <SubType>Code</SubType>
     </Compile>

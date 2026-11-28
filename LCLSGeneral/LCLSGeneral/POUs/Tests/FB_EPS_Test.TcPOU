@@ -1,0 +1,123 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="FB_EPS_Test" Id="{f7ab6a8c-e25c-4c0d-ba1f-e0084f5f8659}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK FB_EPS_Test EXTENDS TcUnit.FB_TestSuite
+(*
+    Unit tests for FB_EPS.setBit.
+
+    Objectives:
+    - Verify that a valid bit index sets/clears exactly the requested bit of
+      eps.nFlags and refreshes eps.bEPS_OK.
+    - Verify that an out-of-range bit index is rejected (setBit returns FALSE
+      and eps.nFlags is left untouched) instead of shifting the mask out of
+      the 32-bit span of eps.nFlags.
+
+    History:
+    - 2026-11-28, taio-generic-0: initial version, covers the nBits range
+      check added for audit finding #94.
+*)
+VAR_INPUT
+END_VAR
+VAR_OUTPUT
+END_VAR
+VAR
+    // EPS data under test, bound to fbEPS.eps before each command
+    eps : DUT_EPS;
+    // Function block under test
+    fbEPS : FB_EPS;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[TestSetBitValidIndexExpectBitCleared();
+TestSetBitHighestIndexExpectBitCleared();
+TestSetBitOutOfRangeIndexExpectRejected();]]></ST>
+    </Implementation>
+    <Method Name="TestSetBitValidIndexExpectBitCleared" Id="{48497ea9-1ffc-42c5-9d4f-d507ff69e095}">
+      <Declaration><![CDATA[METHOD TestSetBitValidIndexExpectBitCleared
+VAR_INPUT
+END_VAR
+VAR
+    // Return value of the method under test
+    bResult : BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[TEST('TestSetBitValidIndexExpectBitCleared');
+
+eps.nFlags := 16#FFFFFFFF;
+eps.bEPS_OK := TRUE;
+fbEPS(eps := eps);
+bResult := fbEPS.setBit(nBits := 5, bValue := FALSE);
+
+AssertTrue(bResult, Message := 'setBit(5, FALSE) should report success');
+AssertEquals_UDINT(Expected := 16#FFFFFFDF,
+    Actual := eps.nFlags,
+    Message := 'Only bit 5 should be cleared');
+AssertFalse(eps.bEPS_OK, Message := 'bEPS_OK should be FALSE while a flag is cleared');
+
+TEST_FINISHED();]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="TestSetBitHighestIndexExpectBitCleared" Id="{622a98c2-8d35-4c83-a8c9-61fbd78e462d}">
+      <Declaration><![CDATA[METHOD TestSetBitHighestIndexExpectBitCleared
+VAR_INPUT
+END_VAR
+VAR
+    // Return value of the method under test
+    bResult : BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[TEST('TestSetBitHighestIndexExpectBitCleared');
+
+// 31 is the last usable bit index: eps.nFlags is a UDINT
+eps.nFlags := 16#FFFFFFFF;
+eps.bEPS_OK := TRUE;
+fbEPS(eps := eps);
+bResult := fbEPS.setBit(nBits := 31, bValue := FALSE);
+
+AssertTrue(bResult, Message := 'setBit(31, FALSE) should report success');
+AssertEquals_UDINT(Expected := 16#7FFFFFFF,
+    Actual := eps.nFlags,
+    Message := 'Only bit 31 should be cleared');
+AssertFalse(eps.bEPS_OK, Message := 'bEPS_OK should be FALSE while a flag is cleared');
+
+TEST_FINISHED();]]></ST>
+      </Implementation>
+    </Method>
+    <Method Name="TestSetBitOutOfRangeIndexExpectRejected" Id="{4c5dcc6a-5c77-490a-ae42-966161c920ec}">
+      <Declaration><![CDATA[METHOD TestSetBitOutOfRangeIndexExpectRejected
+VAR_INPUT
+END_VAR
+VAR
+    // Return value of the method under test
+    bResult : BOOL;
+END_VAR
+]]></Declaration>
+      <Implementation>
+        <ST><![CDATA[TEST('TestSetBitOutOfRangeIndexExpectRejected');
+
+eps.nFlags := 16#FFFFFFFF;
+eps.bEPS_OK := TRUE;
+fbEPS(eps := eps);
+
+// First index beyond the 32-bit span of eps.nFlags
+bResult := fbEPS.setBit(nBits := 32, bValue := FALSE);
+AssertFalse(bResult, Message := 'setBit(32, FALSE) should report an error');
+AssertEquals_UDINT(Expected := 16#FFFFFFFF,
+    Actual := eps.nFlags,
+    Message := 'eps.nFlags must be untouched for an out-of-range bit index');
+AssertTrue(eps.bEPS_OK, Message := 'bEPS_OK must be untouched for an out-of-range bit index');
+
+// Top of the BYTE input range must be rejected as well
+bResult := fbEPS.setBit(nBits := 255, bValue := FALSE);
+AssertFalse(bResult, Message := 'setBit(255, FALSE) should report an error');
+AssertEquals_UDINT(Expected := 16#FFFFFFFF,
+    Actual := eps.nFlags,
+    Message := 'eps.nFlags must be untouched for an out-of-range bit index');
+
+TEST_FINISHED();]]></ST>
+      </Implementation>
+    </Method>
+  </POU>
+</TcPlcObject>
