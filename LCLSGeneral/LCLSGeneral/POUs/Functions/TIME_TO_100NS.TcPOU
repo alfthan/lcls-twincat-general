@@ -2,8 +2,37 @@
 <TcPlcObject Version="1.1.0.1">
   <POU Name="TIME_TO_100NS" Id="{ee77a1b2-f30d-4a79-9ca8-80e9b00aec3d}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION TIME_TO_100NS : ULINT
+(*
+    Convert a TIME value to the 100 ns tick base used by the TwinCAT task timer.
+
+    Purpose
+        Express TIME settings and thresholds in the same unit as
+        F_GetTaskTime(), so the elapsed task time between two calls can be
+        compared directly against a TIME configuration value.
+
+    Usage
+        iTicks := TIME_TO_100NS(nTime);
+        Example (FB_LogMessage, the only current caller):
+            IF (CurrentCallTime - LastCallTime) < TIME_TO_100NS(nLocalTripThreshold)
+            THEN ... END_IF
+        where CurrentCallTime is a ULINT read from F_GetTaskTime().
+
+    Objectives
+        - Single, side effect free conversion: 1 ms = 10 000 ticks of 100 ns.
+        - Resolution is the 1 ms of TIME_TO_ULINT(); any sub-millisecond part of
+          the TIME input is discarded.
+        - The function holds no state and does not compensate wrap-around of the
+          task-time counter; callers compare the difference of two readings.
+
+    History
+        2020-08-04  Alex Wallace               Created for the FB_LogMessage
+                                               circuit breaker thresholds.
+        2026-11-28  LCLS General maintainers  Added this header and the nTime
+                                               inline comment (documentation
+                                               only, no behavior change).
+*)
 VAR_INPUT
-    nTime : TIME;
+    nTime : TIME; // Time to convert, in whole milliseconds (TIME_TO_ULINT resolution)
 END_VAR
 VAR
 END_VAR
