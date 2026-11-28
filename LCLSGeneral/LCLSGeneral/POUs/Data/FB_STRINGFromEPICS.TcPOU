@@ -2,42 +2,83 @@
 <TcPlcObject Version="1.1.0.1">
   <POU Name="FB_STRINGFromEPICS" Id="{7375e1a9-9394-4793-a11a-2580cb4d2362}" SpecialFunc="None">
     <Declaration><![CDATA[(*
-Function block to link an analog value from EPICS to a STRING on the PLC
+    FB_STRINGFromEPICS - links an EPICS STRING PV into PLC logic and exposes one
+    validated value.
 
-Usage:
+    PURPOSE
+        Function block to link an analog value from EPICS to a STRING on the PLC.
+        The block owns its own pytmc link PV, watches the IOC heartbeat and the
+        link and value severities, and republishes the last value it received
+        together with a validity flag, so PLC logic never has to consume a raw
+        EPICS link.
 
-    {attribute 'pytmc' := '
-        pv: INTERNAL:RECORD
-        link: PV:NAME:TO:LINK:TO.VAL@
-    '}
-    fbLinkedValue1 : FB_STRINGFromEPICS;
+    USAGE
+        {attribute 'pytmc' := '
+            pv: INTERNAL:RECORD
+            link: PV:NAME:TO:LINK:TO.VAL@
+        '}
+        fbLinkedValue1 : FB_STRINGFromEPICS;
 
-Such that when PV:NAME:TO:LINK:TO.VAL$ changes in EPICS, the INTERNAL:RECORD will be used to
-push a value through to the PLC with this function block.
+        Such that when PV:NAME:TO:LINK:TO.VAL$ changes in EPICS, the INTERNAL:RECORD
+        will be used to push a value through to the PLC with this function block.
 
-The usage of "@" above has several layers of complexity, which are not strictly necessary to
-understand in order to use this function block. The reasons are as follows:
+        The usage of "@" above has several layers of complexity, which are not strictly
+        necessary to understand in order to use this function block. The reasons are as
+        follows:
 
-    1. TwinCAT does not allow the "$" symbol to be used in pragmas.  pytmc uses "@" as an
-       alternate character for "$" as the latter is more frequently useful.
-    2. The "$" is used as a suffix for EPICS string PVs where accessing strings over
-       the standard 40 character length is desirable.
-    3. Combining the above, using "PV.VAL@" we can direct EPICS to use long string
-       handling over the Channel Access link to the link PV ("PV.VAL$").
+            1. TwinCAT does not allow the "$" symbol to be used in pragmas.  pytmc uses "@"
+               as an alternate character for "$" as the latter is more frequently useful.
+            2. The "$" is used as a suffix for EPICS string PVs where accessing strings
+               over the standard 40 character length is desirable.
+            3. Combining the above, using "PV.VAL@" we can direct EPICS to use long string
+               handling over the Channel Access link to the link PV ("PV.VAL$").
 
-As this block takes care of IOC heartbeat signals and monitors the link and value severity,
-the end-user should then only have to look at `.bValid` and `.sValue`. These are guaranteed to
-be up-to-date and valid within `tTimeout` seconds.
+        As this block takes care of IOC heartbeat signals and monitors the link and value
+        severity, the end-user should then only have to look at `.bValid` and `.sValue`.
+        These are guaranteed to be up-to-date and valid within `tTimeout` seconds.
+
+    OBJECTIVES
+        - Give PLC logic a single already-validated STRING from an EPICS link, so no
+          consumer has to read the raw link value or interpret link severity itself.
+        - Keep a value that EPICS stopped updating from looking fresh: the last value is
+          republished for at most tTimeout (2 s) and then bValid drops to FALSE.
+        - Keep a degraded link from passing silently as healthy data: the last received
+          severity is compared against iMaximumValidSeverity before bValid is set.
+        - Leave the site-specific judgement of "how severe is still usable" to the caller
+          through iMaximumValidSeverity instead of baking a threshold into the block.
+
+    HISTORY
+        2021-07-12 / Ken Lauer
+            Function block created ("ENH: add FB_STRINGFromEPICS"), including the
+            purpose, usage and pytmc "@" notes above.
+        2023-05-22 / Jakob Sagatowski
+            Stored revision re-saved without the product version attribute.
+        2026-11-28 / Scirix Agent
+            Added the PURPOSE, OBJECTIVES and HISTORY sections and the author/date
+            line, plus inline meaning and units comments on every input and output;
+            documentation only, no behaviour change
+            (audit finding #80, convention conv_321640e095c0).
 *)
 
 FUNCTION_BLOCK FB_STRINGFromEPICS
 
 VAR_INPUT
+    // Highest EPICS link severity still accepted as valid data: 0 = NO_ALARM,
+    // 1 = MINOR (default), 2 = MAJOR, 3 = INVALID.  Dimensionless alarm level,
+    // no engineering units.  The last received severity must be <= this value
+    // for bValid to be TRUE; raise it only to tolerate a degraded, usable link.
     iMaximumValidSeverity		: INT := 1;
 END_VAR
 
 VAR_OUTPUT
+    // TRUE while both the value and the severity link have been refreshed
+    // within tTimeout (2 s) AND the last received severity is <=
+    // iMaximumValidSeverity; FALSE as soon as either link goes stale or the
+    // severity is too high.  BOOL flag - no engineering units.
     bValid				: BOOL;
+    // Last STRING value received from the EPICS link PV, held unchanged while
+    // bValid is FALSE.  Empty string until the first value arrives.  Text,
+    // no engineering units.
     sValue				: STRING;
 END_VAR
 
