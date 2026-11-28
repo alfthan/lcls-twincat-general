@@ -90,6 +90,9 @@
     <Compile Include="DUTs\E_ECAT_STATES.TcDUT">
       <SubType>Code</SubType>
     </Compile>
+    <Compile Include="DUTs\ST_AnalogInputSettings.TcDUT">
+      <SubType>Code</SubType>
+    </Compile>
     <Compile Include="GVLs\DefaultGlobals.TcGVL">
       <SubType>Code</SubType>
       <LinkAlways>true</LinkAlways>

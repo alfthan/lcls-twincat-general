@@ -1,0 +1,33 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <DUT Name="ST_AnalogInputSettings" Id="{5b0d8ba5-9be3-4b7c-9a1e-3f6c0f2f9d21}">
+    <Declaration><![CDATA[TYPE ST_AnalogInputSettings :
+STRUCT
+    (* Tunable calibration settings of an FB_AnalogInput.
+
+    These values are operator tunables, exposed to EPICS as writable PVs. They are
+    restored from the persistent store on the first PLC scan and written back to it
+    only when a new value is detected, so a calibration survives a PLC restart.
+    *)
+
+    // Multiplier applied to the scaled terminal value
+    {attribute 'pytmc' := '
+        pv: RES
+        io: io
+        field: DESC Calibration multiplier applied to the scaled value
+        field: PREC 6
+    '}
+    fResolution : LREAL := 1;
+
+    // Offset added after the multiplier is applied
+    {attribute 'pytmc' := '
+        pv: OFF
+        io: io
+        field: DESC Calibration offset added after scaling
+        field: PREC 6
+    '}
+    fOffset : LREAL;
+END_STRUCT
+END_TYPE]]></Declaration>
+  </DUT>
+</TcPlcObject>

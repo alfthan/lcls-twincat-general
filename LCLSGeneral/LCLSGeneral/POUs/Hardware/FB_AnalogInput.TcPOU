@@ -4,7 +4,22 @@
     <Declaration><![CDATA[FUNCTION_BLOCK FB_AnalogInput
 (*
     Converts the integer from an analog input terminal to a real unit value (e.g., volts)
-    2019-10-09 Zachary Lentz
+
+    The tunable calibration values (resolution and offset) live in the
+    ST_AnalogInputSettings structure referenced by iq_stSettings, which is where the
+    EPICS PVs RES and OFF are written. The tunables are restored from the persistent
+    store on the first PLC scan, so a calibration survives a PLC restart, and are
+    written back to the store only when a new value is detected and only after the
+    throttle interval has expired.
+
+    Migration note: the former fResolution and fOffset input terminals are now
+    members of iq_stSettings (iq_stSettings.fResolution, iq_stSettings.fOffset).
+
+    History:
+        2019-10-09 Zachary Lentz - created
+        2026-11-28 Scirix Agent  - tunables moved into a persistent settings structure
+                                   with first-scan restore and a change-detected,
+                                   throttled write-back (conv_0955e202f5e6)
 *)
 VAR_INPUT
     // Connect this input to the terminal
@@ -15,17 +30,13 @@ VAR_INPUT
     fTermMax: LREAL;
     // The fReal value correlated with the terminal's min value
     fTermMin: LREAL;
-    // Value to scale the end result to
+END_VAR
+VAR_IN_OUT
+    // Tunable calibration settings, persisted in the persistent store; its members carry the EPICS PV names
     {attribute 'pytmc' := '
-        pv: RES
-        io: io
+        pv:
     '}
-    fResolution : LREAL := 1;
-    {attribute 'pytmc' := '
-        pv: OFF
-        io: io
-    '}
-    fOffset : LREAL;
+    iq_stSettings : ST_AnalogInputSettings;
 END_VAR
 VAR_OUTPUT
     // The real value read from the output
@@ -35,16 +46,80 @@ VAR_OUTPUT
     '}
     fReal: LREAL;
 END_VAR
+VAR CONSTANT
+    // Minimum interval between write-backs of a changed tunable to the persistent store
+    cPersistWriteThrottle : TIME := T#10S;
+END_VAR
 VAR
+    // Scaling factor derived from the terminal configuration
     fScale: LREAL;
+    // Persistent data plumbing
+    fbWritePersistentData : WritePersistentData; // ADS service that commits the persistent variables to the store
+    tPersistWrite : TON; // Throttle timer gating the write-back of a changed tunable
+    bPersistWritePending : BOOL; // TRUE while a changed tunable waits for the throttle interval to expire
+    bRestorePersistentData : BOOL := TRUE; // TRUE on the first PLC scan: the tunables are restored from the store
+END_VAR
+VAR PERSISTENT
+    // Last-written cache of the calibration multiplier, compared with iq_stSettings.fResolution every scan
+    fSavedResolution : LREAL;
+    // Last-written cache of the calibration offset, compared with iq_stSettings.fOffset every scan
+    fSavedOffset : LREAL;
+    // TRUE once the tunables have been stored at least once, so a fresh PLC keeps its configured defaults
+    bSettingsSaved : BOOL;
 END_VAR]]></Declaration>
     <Implementation>
-      <ST><![CDATA[IF fScale = 0 AND fTermMax > fTermMin THEN
+      <ST><![CDATA[// A missing reference would fault on the first dereference, so leave the block untouched instead
+IF NOT __ISVALIDREF(iq_stSettings) THEN
+    RETURN;
+END_IF
+
+(* Persist the tunable calibration values.
+   1) On the first PLC scan the tunables are restored from the persistent store into
+      the settings structure, so a calibration survives a PLC restart.
+   2) Every scan the settings structure is compared against the last-written cache.
+   3) A new value refreshes that cache and arms a write-back, which is only committed
+      once the throttle interval has expired, so a burst of operator changes costs a
+      single persistent-store write. *)
+
+// 1) First-scan restore of the tunables from the persistent store
+IF bRestorePersistentData THEN
+    bRestorePersistentData := FALSE;
+    IF bSettingsSaved THEN
+        // A stored calibration wins over the parameter initial values
+        iq_stSettings.fResolution := fSavedResolution;
+        iq_stSettings.fOffset := fSavedOffset;
+    ELSE
+        // Nothing stored yet: remember the configured defaults instead of overwriting them
+        fSavedResolution := iq_stSettings.fResolution;
+        fSavedOffset := iq_stSettings.fOffset;
+        bSettingsSaved := TRUE;
+    END_IF
+END_IF
+
+// 2) Change detection against the last-written cache
+IF (iq_stSettings.fResolution <> fSavedResolution) OR (iq_stSettings.fOffset <> fSavedOffset) THEN
+    fSavedResolution := iq_stSettings.fResolution; // Refresh the last-written cache
+    fSavedOffset := iq_stSettings.fOffset;
+    bPersistWritePending := TRUE; // Arm the throttled write-back
+END_IF
+
+// 3) Throttled write-back. START is pulsed for a single cycle, as in the other
+//    persistent-data blocks of this library.
+tPersistWrite(IN := bPersistWritePending, PT := cPersistWriteThrottle);
+IF tPersistWrite.Q THEN
+    bPersistWritePending := FALSE;
+    fbWritePersistentData(NETID := '', PORT := 851, START := TRUE, TMOUT := T#1s);
+END_IF
+
+// Set the scaling from the terminal configuration
+IF fScale = 0 AND fTermMax > fTermMin THEN
     fScale := (EXPT(2, iTermBits) - 1) / (fTermMax - fTermMin);
 END_IF
+
+// Convert the raw value to the terminal unit and apply the persisted calibration
 IF fScale <> 0 THEN
     fReal := iRaw / fScale + fTermMin;
-    fReal := fReal * fResolution + fOffset;
+    fReal := fReal * iq_stSettings.fResolution + iq_stSettings.fOffset;
 END_IF]]></ST>
     </Implementation>
   </POU>
