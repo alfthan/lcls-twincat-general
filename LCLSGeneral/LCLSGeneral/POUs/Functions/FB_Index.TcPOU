@@ -33,7 +33,18 @@ IF nVal < LowerLimit THEN nVal := UpperLimit; END_IF]]></ST>
       </Implementation>
     </Action>
     <Method Name="DecVal" Id="{cf4e17a1-86cd-4a59-ad6f-fc3838ffede5}">
-      <Declaration><![CDATA[//Decrement the counter and return new value
+      <Declaration><![CDATA[(*
+    Purpose: decrement the FB_Index counter by ValInc and return the new value.
+    Usage: iPrevious := fbIndex.DecVal();
+    Objectives: move the index one increment towards LowerLimit, rolling over
+    to UpperLimit when the step would take it below the lower bound, so the
+    value always stays inside [LowerLimit, UpperLimit]; return the post-step
+    value so the caller does not have to read nVal separately.
+    History: 2016-09-03 A. Wallace - created with FB_Index.
+             2026-11-28 - header expanded to purpose/usage/objectives/history;
+             no logic changed (method-header audit, task #510).
+    Author/Date: A. Wallace 2016-09-03
+*)
 METHOD DecVal : INT
 VAR_INPUT
 END_VAR
@@ -51,7 +62,18 @@ IF nVal >  UpperLimit THEN nVal := LowerLimit; END_IF]]></ST>
       </Implementation>
     </Action>
     <Method Name="IncVal" Id="{6f28d89a-7191-4dad-8824-c5fe9fb32dd9}">
-      <Declaration><![CDATA[//Increment the counter and return new value
+      <Declaration><![CDATA[(*
+    Purpose: increment the FB_Index counter by ValInc and return the new value.
+    Usage: iNext := fbIndex.IncVal();
+    Objectives: move the index one increment towards UpperLimit, rolling over
+    to LowerLimit when the step would take it above the upper bound, so the
+    value always stays inside [LowerLimit, UpperLimit]; return the post-step
+    value so the caller does not have to read nVal separately.
+    History: 2016-09-03 A. Wallace - created with FB_Index.
+             2026-11-28 - header expanded to purpose/usage/objectives/history;
+             no logic changed (method-header audit, task #510).
+    Author/Date: A. Wallace 2016-09-03
+*)
 METHOD PUBLIC IncVal : INT
 VAR_INPUT
 END_VAR
