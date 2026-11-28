@@ -7,7 +7,7 @@ VAR_INPUT
     sMsg			: T_MaxString; 					// Message to send
     eSevr			: TcEventSeverity	:= TcEventSeverity.Verbose;
     eSubsystem		: E_Subsystem; 					// Subsystem
-    sJson			: STRING(7000)	:= '{}';		// JSON to add to the message
+    sJson			: STRING(GVL_Logger.nMaxJsonLength)	:= '{}';	// JSON to add to the message
 
     //Circuit breaker settings
     nMinTimeViolationAcceptable : INT := GVL_Logger.nMinTimeViolationAcceptable; // How many times the min. time can be violated before the CB trips
@@ -25,7 +25,9 @@ VAR
     bInitFailed			:	BOOL := FALSE;
     sSubsystemSource	:	STRING;
     fbMessage			:	REFERENCE TO FB_TcMessage;
-    fbMessages 			:	ARRAY [0..4] OF FB_TcMessage;
+    // One message instance per severity; the array is indexed by the severity event ID, so the
+    // bound follows GVL_Logger.nMaxSeverityCount (the severity count in TC_EVENTS.LCLSGeneralEventClass)
+    fbMessages 			:	ARRAY [0..GVL_Logger.nMaxSeverityCount - 1] OF FB_TcMessage;
     fbSource 			:	FB_TcSourceInfo;
     ipResultMessage	 	:	I_TcMessage;
     hr 					:	HRESULT;
@@ -70,7 +72,26 @@ VAR
 
 END_VAR]]></Declaration>
     <Implementation>
-      <ST><![CDATA[IF NOT bInitialized AND NOT bInitFailed THEN
+      <ST><![CDATA[// The severity event IDs double as indices into fbMessages[], whose bound comes from
+// GVL_Logger.nMaxSeverityCount. If a severity is added or renumbered in GlobalEvents.tmc past that
+// bound, the initialization below would index outside the array: fail loudly instead.
+IF NOT bInitialized AND NOT bInitFailed THEN
+    IF    TC_EVENTS.LCLSGeneralEventClass.Critical.nEventId > GVL_Logger.nMaxSeverityCount - 1
+       OR TC_EVENTS.LCLSGeneralEventClass.Error.nEventId    > GVL_Logger.nMaxSeverityCount - 1
+       OR TC_EVENTS.LCLSGeneralEventClass.Warning.nEventId  > GVL_Logger.nMaxSeverityCount - 1
+       OR TC_EVENTS.LCLSGeneralEventClass.Info.nEventId     > GVL_Logger.nMaxSeverityCount - 1
+       OR TC_EVENTS.LCLSGeneralEventClass.Verbose.nEventId  > GVL_Logger.nMaxSeverityCount - 1
+    THEN
+        bInitFailed := TRUE;
+        ADSLOGSTR(
+            msgCtrlMask := ADSLOG_MSGTYPE_ERROR,
+            msgFmtStr   := '[LOGGER] Severity event ID outside GVL_Logger.nMaxSeverityCount in %s',
+            strArg      := sPath,
+        );
+    END_IF
+END_IF
+
+IF NOT bInitialized AND NOT bInitFailed THEN
 
     hr := fbMessages[TC_EVENTS.LCLSGeneralEventClass.Verbose.nEventId].CreateEx(TC_EVENTS.LCLSGeneralEventClass.Verbose, 0 (*fbSource*) );
     IF FAILED(hr) THEN
