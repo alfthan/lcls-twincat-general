@@ -2,13 +2,92 @@
 <TcPlcObject Version="1.1.0.1">
   <DUT Name="ST_PendingEvent" Id="{abbfd234-3623-42a3-aa27-c85d027ac193}">
     <Declaration><![CDATA[TYPE ST_PendingEvent :
+(*
+    ST_PendingEvent - one slot of FB_Listener's pending-event buffer.
+
+    PURPOSE
+        Hold one event that FB_Listener has accepted but not yet published.
+        When an alarm, message, confirmation or clear fires, StoreEvent captures
+        the event's severity, id, class, timestamp, source, type and JSON
+        attributes in stEventInfo and starts an asynchronous request for the
+        human-readable event text. The JSON document cannot be sent until that
+        text has arrived, so the event waits in this slot instead of blocking
+        the calling PLC task.
+
+    USAGE
+        Never instantiated on its own. FB_Listener declares
+        stPendingEvents : ARRAY [0..nMaxEvents - 1] OF ST_PendingEvent
+        (nMaxEvents is the fixed number of events handled per cycle) and walks it
+        as a ring buffer.
+
+        Writer - FB_Listener.StoreEvent: scans forward from nEventIdx until it
+        finds a slot whose bInUse is FALSE, claims that slot
+        (bInUse := TRUE, nPendingEvents + 1), fills stEventInfo and calls
+        fbRequestEventText.Request(...).
+
+        Reader - FB_Listener.PublishEvents: for every slot with bInUse = TRUE it
+        waits until fbRequestEventText is no longer busy, copies the text into
+        stEventInfo.msg through GetString, builds the JSON document and sends it,
+        then frees the slot (bInUse := FALSE, nPendingEvents - 1) and leaves
+        nEventIdx pointing at it so the next StoreEvent reuses it first.
+
+        A slot therefore lives over several PLC cycles: claimed in the cycle the
+        event arrives, published once the logger has produced the text. When all
+        slots are still claimed, StoreEvent reports "Logging message buffer full"
+        and drops the event.
+
+    OBJECTIVES
+        - Keep event logging asynchronous, so a slow Tc3_EventLogger text
+          request never stalls the calling PLC task.
+        - Bind an event's metadata and its text request together in one slot, so
+          the text that finally arrives is matched to the event it belongs to.
+        - Give FB_Listener a fixed, statically sized buffer with an explicit
+          occupancy flag instead of dynamic allocation.
+        - Make the pending buffer inspectable online: the bInUse flags of
+          stPendingEvents show how many events are in flight.
+
+    HISTORY
+        2019-11-12 / K Lauer
+            Type added with the rewrite of the logging system onto
+            Tc3_EventLogger (asynchronous event-text retrieval).
+        2020-01-09 / K Lauer
+            Event info member retyped to the pinned global ST_LoggingEventInfo.
+        2021-11-02 / K Lauer
+            Style pass: pre-commit run --all-files (whitespace); no logic change.
+        2023-05-22 / Jakob Sagatowski
+            Removed the "Write product version in files" flag from the projects.
+        2026-11-28 / Scirix Agent
+            Added this header and the member comments below; type layout and
+            behaviour unchanged (audit finding #1080, convention
+            conv_321640e095c0).
+*)
 STRUCT
 
+    // Event metadata copied from the FB_TcEvent by FB_Listener.StoreEvent: id
+    // (UDINT event id), event_class (GUID as string), severity, ts (Unix
+    // timestamp, seconds), source, event_type and json (the event's JSON
+    // attributes as an escaped string). PublishEvents adds plc (host name) and
+    // msg (the retrieved text). Values carry the logger's own units, so no
+    // scaling is applied here.
     {attribute 'pytmc' := '
         pv:
     '}
     stEventInfo			:	ST_LoggingEventInfo;
+
+    // Slot occupancy flag, not a state: FALSE by default, set TRUE the moment
+    // FB_Listener.StoreEvent claims this slot, and reset to FALSE by
+    // PublishEvents once the slot's JSON has been sent. The only member that
+    // marks the slot as taken; stEventInfo and fbRequestEventText are only
+    // meaningful while it is TRUE.
     bInUse				:	BOOL;
+
+    // Asynchronous retrieval of this event's human-readable text from the
+    // TwinCAT event logger (FB_RequestEventText, Tc3_EventLogger). StoreEvent
+    // starts it with the event class, event id, language id 1033 and the event's
+    // arguments; PublishEvents polls bBusy and, once it drops, copies the text
+    // into stEventInfo.msg with GetString(). If bError is set the published msg
+    // reads "(Unable to retrieve message)". The text buffer lives in this
+    // instance, which is why it has to move together with the slot.
     fbRequestEventText	:	FB_RequestEventText;
 
 END_STRUCT
