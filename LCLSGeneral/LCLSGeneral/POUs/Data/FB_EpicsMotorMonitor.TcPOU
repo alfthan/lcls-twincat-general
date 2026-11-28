@@ -2,76 +2,146 @@
 <TcPlcObject Version="1.1.0.1">
   <POU Name="FB_EpicsMotorMonitor" Id="{c6bf2af8-e9b0-4ebb-b06e-d35a94600f72}" SpecialFunc="None">
     <Declaration><![CDATA[(*
-    EPICS Motor Record Monitoring tool
+    FB_EpicsMotorMonitor - monitor an EPICS motor record from the PLC.
 
-    Requirements:
+    PURPOSE
 
-    * Requires an existing IOC with an EPICS motor record.
-    * Requires a pytmc "link" pragma to specify the motor record prefix.
+        Makes the status of an EPICS motor record visible inside the PLC
+        project, so PLC logic can react to motor position and motion state
+        without a separate ADS or cross-IOC client.
 
-    What information is included?
+        What information is included?
 
-    * The validity of the source data (as determined by alarm severity)
-    * Readback value (scaled encoder position in ``fPosition``)
-    * Motion status (moving or not, ``bIsMoving``)
-    * Homed status, limit status, and others (via ``stMSTA``, see
-      ``ST_EpicsMotorMSTA``).
+        * The validity of the source data (as determined by alarm severity)
+        * Readback value (scaled encoder position in ``fPosition``)
+        * Motion status (moving or not, ``bIsMoving``)
+        * Homed status, limit status, and others (via ``stMSTA``, see
+          ``ST_EpicsMotorMSTA``)
 
-    Example:
+    USAGE
 
-        {attribute 'pytmc' := '
-            pv: @(PREFIX):Internal:Mon
-            link: MOTOR:PV:NAME
-        '}
-        fbMotorMonitor : FB_EpicsMotorMonitor;
+        Requirements:
 
-        fbMotorMonitor(bEnable:=TRUE);
-        IF fbMotorMonitor.bValid THEN
-            fbMotorMonitor.fPosition;
-            fbMotorMonitor.bIsMoving;
-            fbMotorMonitor.stMSTA.bHomed;
-        END_IF
+        * Requires an existing IOC with an EPICS motor record.
+        * Requires a pytmc "link" pragma to specify the motor record prefix.
 
-    Above, ``MOTOR:PV:NAME`` should refer to an EPICS motor record.
-    That is, ``caget MOTOR:PV:NAME.RTYP`` should return "motor".
+        Example:
 
-    How does this work?
+            {attribute 'pytmc' := '
+                pv: @(PREFIX):Internal:Mon
+                link: MOTOR:PV:NAME
+            '}
+            fbMotorMonitor : FB_EpicsMotorMonitor;
 
-    pytmc offers the ability to push EPICS process variable data into PLCs by
-    way of link pragmas.  These link pragmas create additional supporting EPICS
-    records that monitor PVs from any IOC on the controls network. In this case,
-    the PLC IOC will monitor vital motor record information and let your PLC
-    project know of its status.
+            fbMotorMonitor(bEnable:=TRUE);
+            IF fbMotorMonitor.bValid THEN
+                fbMotorMonitor.fPosition;
+                fbMotorMonitor.bIsMoving;
+                fbMotorMonitor.stMSTA.bHomed;
+            END_IF
 
-    Note that not all motor records may be created equally.  Some of the status
-    fields may not be consistent.  Be sure to check how your motor works and
-    what fields are worth paying attention to when using this.
+        Above, ``MOTOR:PV:NAME`` should refer to an EPICS motor record.
+        That is, ``caget MOTOR:PV:NAME.RTYP`` should return "motor".
 
+        Call the block once per PLC cycle. Only the outputs of a cycle with
+        ``bValid`` set are trustworthy: while a link is stale or in alarm the
+        block repeats the last values it read, and while ``bEnable`` is FALSE
+        it reports ``bValid`` as FALSE and leaves every other output untouched.
+
+    OBJECTIVES
+
+        * Surface the three pieces of motor-record state PLC logic needs most
+          (RBV, DMOV and MSTA) behind one small, stable interface.
+        * Never let a position or a status bit look trustworthy unless all
+          three underlying cross-IOC links are alive; ``bValid`` gates every
+          other output.
+        * Decode the raw MSTA bit field once, so call sites read named status
+          bits (``stMSTA.bHomed``) instead of bit numbers.
+
+    HOW DOES THIS WORK?
+
+        pytmc offers the ability to push EPICS process variable data into PLCs
+        by way of link pragmas.  These link pragmas create additional
+        supporting EPICS records that monitor PVs from any IOC on the controls
+        network. In this case, the PLC IOC will monitor vital motor record
+        information and let your PLC project know of its status.
+
+        Note that not all motor records may be created equally.  Some of the
+        status fields may not be consistent.  Be sure to check how your motor
+        works and what fields are worth paying attention to when using this.
+
+    HISTORY
+
+        2022-03-09 / K Lauer
+            Function block created, released together with
+            FB_EpicsCentroidMonitor.
+        2022-03-10 / Ken Lauer
+            Expanded the header to explain what the monitor reports and how
+            the link pragmas feed it.
+        2023-03-02 / Zachary Lentz
+            pre-commit formatting only; no logic change.
+        2024-10-10 / Josue Zamudio
+            Removed a trailing-whitespace line while adding the EtherCAT
+            auto-restart terminal; no logic change.
+        2026-11-28 / Scirix Agent
+            Split the header into purpose/usage/objectives/history and
+            documented every declaration; comments only, no behaviour change
+            (audit finding #71, convention conv_321640e095c0).
 *)
 FUNCTION_BLOCK FB_EpicsMotorMonitor
 VAR_INPUT
+    (* Monitoring enable: TRUE = evaluate the links and refresh the outputs.
+       FALSE = stop monitoring, force bValid := FALSE and leave the other
+       outputs at their last value. Unit: BOOL. *)
     bEnable : BOOL := TRUE;
 END_VAR
 VAR_OUTPUT
+    (* TRUE while the motor is moving. Derived from the motor record DMOV
+       field, where DMOV = 0 means "moving" and DMOV = 1 means "done moving /
+       not moving". Unit: BOOL. Meaningful only when bValid is TRUE. *)
     bIsMoving : BOOL;
+    (* Motor readback position, copied from the motor record .RBV field.
+       Unit: the motor's engineering units (EGU) as configured on the IOC
+       (e.g. mm or degrees) - this block does not rescale it. Meaningful only
+       when bValid is TRUE. *)
     fPosition : LREAL;
+    (* Raw motor status word (MSTA) read from the record and converted with
+       LREAL_TO_UINT, so only its low 16 bits are kept. Unit: none; it is a
+       bit field. Bits 0..14 are decoded into stMSTA below, bit 15 and above
+       are not represented. Meaningful only when bValid is TRUE. *)
     nMSTA_Raw : UINT;
+    (* Motor status bits decoded from nMSTA_Raw: direction, done, plus/minus
+       and home limit switches, closed loop, slip/stall, home, encoder
+       present, hardware problem, moving, gain support, comm error, homed.
+       See ST_EpicsMotorMSTA for the per-bit meaning. Unit: none (BOOL per
+       bit). Meaningful only when bValid is TRUE. *)
     stMSTA : ST_EpicsMotorMSTA;
+    (* TRUE when all three cross-IOC links (.RBV, .DMOV, .MSTA) are alive and
+       report an alarm severity no worse than MINOR; FALSE when bEnable is
+       FALSE, when a link goes stale, or when a link raises a worse severity.
+       While FALSE, none of the other outputs may be trusted. Unit: BOOL. *)
     bValid : BOOL;
 END_VAR
 VAR
+    (* Reads the .RBV field (scaled readback position) of the linked motor
+       record. Unit of fValue: motor engineering units (EGU). *)
     {attribute 'pytmc' := '
         pv: RBV_
         link: .RBV
     '}
     fbRBVCheck : FB_LREALFromEPICS;
 
+    (* Reads the .DMOV field of the linked motor record: 1 = done moving /
+       not moving, 0 = moving. Unit of fValue: none (flag carried as LREAL). *)
     {attribute 'pytmc' := '
         pv: Dmov_
         link: .DMOV
     '}
     fbMovingCheck : FB_LREALFromEPICS;
 
+    (* Reads the .MSTA field of the linked motor record (status bit field,
+       carried as LREAL by the link) and feeds nMSTA_Raw. Unit of fValue:
+       none (bit field as a number). *)
     {attribute 'pytmc' := '
         pv: Msta_
         link: .MSTA
