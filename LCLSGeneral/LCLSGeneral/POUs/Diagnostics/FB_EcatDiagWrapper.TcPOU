@@ -2,6 +2,90 @@
 <TcPlcObject Version="1.1.0.1">
   <POU Name="FB_EcatDiagWrapper" Id="{ae68027c-9136-4dab-b887-f964a869ea04}" SpecialFunc="None">
     <Declaration><![CDATA[FUNCTION_BLOCK FB_EcatDiagWrapper
+(*
+    FB_EcatDiagWrapper - one EtherCAT bus verdict for one master, condensed from the
+    two underlying diagnostic blocks.
+
+    PURPOSE
+        Bundle the two EtherCAT diagnostic blocks a program needs, so a caller
+        gets a whole-bus verdict from a single instance and a single call.
+        fbEtherCATFrameDiag condenses the master's first-frame WcState word into
+        bFrameWcStateOK, which this block publishes as bAllFrameWcStatesOK.
+        fbEtherCATDiag then takes that flag together with the master's slave
+        counts and device state and produces the deep diagnostic: bEtherCATOK
+        plus the separate bFrameWcStateError / bSlaveCountError /
+        bMasterDevStateError flags, the decoded stMasterDevState structure, and
+        - while a fault is being investigated - a per-slave JSON record on the
+        shared logger. bBusy, bError and iErrorID report the state of that inner
+        diagnostic.
+
+    USAGE
+        Declare one instance in a GVL and call it every PLC cycle. The block has
+        no VAR_INPUT: everything it needs it reads through its own linked AT %I*
+        variables, so the caller passes nothing and the wiring lives in the
+        declaration below. Every link points at the EtherCAT master's IO and
+        hard-codes the master name "Device 1 (EtherCAT)"; a project whose master
+        device carries another name must retarget all six TcLinkTo pragmas, or
+        the block reads zeros and reports a slave-count error against a healthy
+        bus. Links required: Inputs^Frm1WcState (frame WcState word),
+        Inputs^SlaveCount and InfoData^CfgSlaveCount (found vs configured slave
+        count), Inputs^DevState (master device state) and InfoData^DevId /
+        InfoData^AmsNetId (the master's identity).
+        Wiring side effects worth knowing:
+        - arrEcMasterNetId is mandatory. F_CreateAmsNetId turns it into
+          sEcMasterNetId, and while that is empty or '0.0.0.0.0.0' the inner
+          diagnostic sets bError with iErrorID = 7 instead of starting, so a
+          missed NetId link surfaces as a latched bError rather than as silence.
+        - sIPCNetID is passed as '' (local IPC) and eSubSystem is not forwarded,
+          so the inner diagnostic keeps its own E_Subsystem.FIELDBUS default and
+          logs under the fieldbus subsystem.
+        - tTimeout is fixed at T#5s here for every ADS request the inner
+          diagnostic issues. Because wReqZeroMask and tTimeout are internal
+          declarations rather than inputs, a project that needs a different
+          frame mask or ADS timeout must change them in this block.
+        The masked frame check is combinational, so bAllFrameWcStatesOK follows
+        the frame word in the same cycle; the deeper verdict in bEtherCATOK comes
+        from the inner state machine, which only sweeps the bus when one of the
+        observed inputs changes.
+
+    OBJECTIVES
+        - Give a program one instance and one call for EtherCAT diagnostics,
+          instead of instantiating and plumbing the two lower-level blocks.
+        - Keep the raw master IO links in a single place, so the IO mapping of a
+          bus is reviewable in one declaration rather than at every call site.
+        - Expose the frame, slave-count and master-device-state faults as
+          separate flags, so a caller or EPICS record can react to the kind of
+          fault rather than to a single opaque "bus not OK".
+        - Hand the deep diagnostic's per-slave detail to the shared logger, so a
+          bus failure leaves a diagnosable record without the caller collecting
+          it.
+
+    HISTORY
+        2020-03-15 / Alex Wallace
+            Function block added with the BI EtherCAT diagnostics example,
+            wrapping FB_EtherCATFrameDiag and FB_EtherCATDiag.
+        2020-03-15 / Alex Wallace
+            Same-day follow-ups: TcLinkTo paths corrected for the master inputs,
+            and the extra "fast frame" input removed again.
+        2020-03-25 / Alex Wallace
+            Slave-info arrays widened from ARRAY [0..3] to ARRAY [0..ESC_MAX_PORTS]
+            so the diagnostic covers every ESC port.
+        2021-11-02 / K Lauer
+            Style pass: pre-commit run --all-files (leading tabs, trailing
+            whitespace); no logic change.
+        2023-05-22 / Jakob Sagatowski
+            Removed the "Write product version in files" flag from the projects.
+        2026-11-28 / Scirix Agent
+            Added this header comment; declaration and implementation bodies
+            unchanged, existing inline declaration comments kept (audit finding
+            #83, convention conv_321640e095c0).
+
+    NOTE
+        The two VAR_IN_OUT arrays of FB_EtherCATDiag are fed from this block's own
+        arrDiagSlaveInfo / arrDiagSlaveInfoScanned buffers, sized ESC_MAX_PORTS, so
+        the per-slave diagnostic data stays inside this instance and is not
+        published to the caller; it reaches consumers only through the logger.
+*)
 VAR_INPUT
 END_VAR
 VAR_OUTPUT
