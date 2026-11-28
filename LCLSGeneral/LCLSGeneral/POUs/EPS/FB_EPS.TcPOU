@@ -15,23 +15,56 @@ END_VAR
     </Implementation>
     <Method Name="setBit" Id="{243035d2-b889-46d7-b89e-610b76586068}">
       <Declaration><![CDATA[METHOD setBit : BOOL
+(*
+    Sets or clears a single bit of eps.nFlags and refreshes eps.bEPS_OK.
+
+    Usage: call with the bit index to modify (nBits) and the value to write
+    into that bit (bValue). The method returns TRUE when the request was
+    applied, and FALSE when the bit index is outside the span of eps.nFlags or
+    when the eps reference is invalid (in both cases nothing is written).
+
+    Objectives:
+    - Reject an out-of-range bit index before it is used as a shift count, so a
+      caller-supplied index can never shift the mask out of the register and
+      silently leave the flag unchanged or hit the wrong bit.
+    - Keep eps.bEPS_OK in sync with the whole flag word.
+
+    History:
+    - 2026-11-28, taio-generic-0: validate nBits against the width of eps.nFlags
+      before shifting it (audit finding #94).
+*)
 VAR_INPUT
+    // Bit index into eps.nFlags, valid range 0..GeneralConstants.EPS_NUM_FLAGS-1
     nBits : BYTE;
+    // Value to write into the selected bit
     bValue : BOOL;
 END_VAR
 VAR
+    // Single-bit mask built from nBits
     nMask : UDINT := 1;
+    // Current value of the selected bit, either 0 or 1
     nBitValue : UDINT := 0;
 END_VAR
 ]]></Declaration>
       <Implementation>
-        <ST><![CDATA[nMask := SHL(nMask, nBits);
+        <ST><![CDATA[setBit := FALSE;
+
+// Validate the caller-supplied bit index against the span of eps.nFlags before
+// using it as a shift count. eps.nFlags is a UDINT, so only the
+// GeneralConstants.EPS_NUM_FLAGS (32) lowest bits exist; an out-of-range index
+// would shift the mask out of the register and silently leave the flag
+// unchanged or set the wrong bit. Leave with an error (FALSE) in that case.
+IF nBits >= GeneralConstants.EPS_NUM_FLAGS THEN
+    RETURN;
+END_IF
+
 // Checking the VAR_IN_OUT reference, leave the current method in case of invalid reference
 IF NOT __ISVALIDREF(eps) THEN
     RETURN;
 END_IF
 
 (* Access to VAR_IN_OUT reference (only if the reference was confirmed as valid before) *)
+nMask := SHL(nMask, nBits);
 nBitValue := SHR((nMask AND eps.nFlags), nBits);
 
 IF (TO_BOOL(nBitValue)) <> bValue THEN
@@ -44,6 +77,9 @@ IF eps.nFlags = 16#FFFFFFFF THEN
 ELSE
     eps.bEPS_OK := FALSE;
 END_IF
+
+// The request was valid and has been applied
+setBit := TRUE;
 ]]></ST>
       </Implementation>
     </Method>

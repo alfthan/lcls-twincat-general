@@ -9,6 +9,10 @@ VAR_GLOBAL CONSTANT
     // You can make this smaller if you want to use less memory in your program in exchange for limiting your max state count
     // You can make this larger if you want to use states-based FBs sized beyond the EPICS enum limit
     MAX_STATES: UINT := 15;
+
+    // Number of flag bits carried in DUT_EPS.nFlags: nFlags is a UDINT, so the
+    // highest usable EPS flag / bit index is EPS_NUM_FLAGS - 1.
+    EPS_NUM_FLAGS: BYTE := 32;
 END_VAR
 ]]></Declaration>
   </GVL>
