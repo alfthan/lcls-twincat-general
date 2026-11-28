@@ -9,6 +9,14 @@ VAR_GLOBAL CONSTANT
     // You can make this smaller if you want to use less memory in your program in exchange for limiting your max state count
     // You can make this larger if you want to use states-based FBs sized beyond the EPICS enum limit
     MAX_STATES: UINT := 15;
+
+    // Tolerance used when deciding whether an EPICS motor is still moving.
+    // The motor record's DMOV field arrives over an EPICS link as an LREAL, so
+    // the test is ABS(DMOV) < cMovingEpsilon: any value below the tolerance
+    // (including small non-zero residues) means "still moving".
+    // Declared here so the threshold is visible and tunable in one place
+    // instead of being buried in FB_EpicsMotorMonitor.
+    cMovingEpsilon: LREAL := 1.0E-5;
 END_VAR
 ]]></Declaration>
   </GVL>

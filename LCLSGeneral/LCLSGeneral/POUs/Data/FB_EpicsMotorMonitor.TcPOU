@@ -97,7 +97,7 @@ bValid := (
      DMOV = 0 -> moving
      DMOV = 1 -> done moving, or not moving
 *)
-bIsMoving := ABS(fbMovingCheck.fValue) < 1e-5;
+bIsMoving := ABS(fbMovingCheck.fValue) < GeneralConstants.cMovingEpsilon;
 fPosition := fbRBVCheck.fValue;
 
 nMSTA_Raw := LREAL_TO_UINT(fbMotorStatusCheck.fValue);
