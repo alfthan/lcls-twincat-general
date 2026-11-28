@@ -3,12 +3,16 @@
   <DUT Name="ST_TopologyData" Id="{5d08a84e-1f56-46ac-aaa4-2ed7c29c3705}">
     <Declaration><![CDATA[TYPE ST_TopologyData :
 STRUCT
-    iOwnPhysicalAddr 	: UINT;
-    iOwnAutoIncAddr		: UINT;
-    stPhysicalAddr		: ST_PortAddr;
-    stAutoIncAddr		: ST_PortAddr;
-    iPortDelay			: ARRAY [0..2] OF UDINT; (* EC_AD, EC_DB, EC_BC *)
-    iReserved			: ARRAY [0..7] OF UDINT;
+    (* Per-slave EtherCAT topology record as returned by the EtherCAT master
+       (ADS read, index group 16#22, index offset 0), one record per slave.
+       Member order and types must match the master's data block exactly:
+       do not add, remove or reorder members. *)
+    iOwnPhysicalAddr 	: UINT;			(* Physical address of this slave as assigned by the master, unitless *)
+    iOwnAutoIncAddr		: UINT;			(* Auto-increment (ring position) address of this slave, unitless *)
+    stPhysicalAddr		: ST_PortAddr;	(* Physical address of the neighbour slave at each port of this slave, unitless, 0 = no slave *)
+    stAutoIncAddr		: ST_PortAddr;	(* Auto-increment address of the neighbour slave at each port of this slave, unitless, 0 = no slave *)
+    iPortDelay			: ARRAY [0..2] OF UDINT; (* Ring segment delay: [0] EC_AD, [1] EC_DB, [2] EC_BC; units: raw EtherCAT delay counts as reported by the master, not converted to time here *)
+    iReserved			: ARRAY [0..7] OF UDINT; (* Reserved padding required by the master's data layout, must stay 0 and is not used *)
 END_STRUCT
 END_TYPE]]></Declaration>
   </DUT>
