@@ -1,23 +1,105 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <TcPlcObject Version="1.1.0.1">
   <POU Name="FB_FlutterDetection" Id="{c8cb2075-e5fd-4dea-b15a-15110d76a9c6}" SpecialFunc="None">
-    <Declaration><![CDATA[FUNCTION_BLOCK FB_FlutterDetection
+    <Declaration><![CDATA[(*
+    FB_FlutterDetection - report a boolean signal that toggles too often.
+
+    PURPOSE
+        Watch a boolean variable and flag it when it changes state (flips)
+        more often than allowed inside an observation window.  A signal that
+        chatters like this makes downstream logic (valve commands, motion
+        permits, alarms) unstable, so the block turns the chatter into a
+        single latched indication the caller can act on or report.
+
+    USAGE
+        Call the block once per PLC cycle with the boolean to monitor:
+
+            fbFlutterDet(bVarToMonitor := someBool);
+
+            IF fbFlutterDet.bExceededFlipMax THEN
+                // signal is fluttering - handle as a fault
+            END_IF
+
+        Tune the sensitivity with fPastTime (window length, default 5 s) and
+        nMaxFlipsAllowed (flips tolerated per window, default 10).  When the
+        limit is exceeded the output latches and counting stops; pulse bReset
+        to acknowledge and start again.  Note that the first window ends
+        fPastTime after the first cycle the block ran in - not after the first
+        flip - and that only the latched verdict is exposed, never the count.
+
+    OBJECTIVES
+        - Turn raw signal chatter into one BOOL a caller can diagnose without
+          keeping its own per-signal toggle counters.
+        - State the sensitivity in engineering units: a number of flips per
+          TIME window, tunable at the call site.
+        - Latch the verdict, so a transient event stays visible after the
+          signal has settled and has to be acknowledged rather than silently
+          clearing itself.
+        - Stay non-blocking and allocation free: one TON plus one R_TRIG, no
+          waits, safe to call from a cyclic task.
+
+    HISTORY
+        2024-03-19 / nwaters
+            Function block created with the flutter detection logic.
+        2024-05-10 / nwaters
+            Added the pytmc pragma that exposes bReset as FLUTTER:RESET.
+        2026-11-28 / Scirix Agent
+            Added this header comment and an inline comment on every
+            declaration; documentation only, no behaviour change
+            (audit finding #86, convention conv_321640e095c0).
+*)
+FUNCTION_BLOCK FB_FlutterDetection
 VAR_INPUT
+    // Boolean signal to watch. Level is not interpreted; every change from
+    // the previous cycle's value counts as one flip. Units: none (discrete).
     bVarToMonitor : BOOL;
+
+    // Length of the observation window in which flips are counted.
+    // Units: TIME. Default T#5000ms = 5 s. The window restarts when it ends
+    // without exceeding the limit, and when the block is reset.
     fPastTime : TIME := T#5000ms;
+
+    // Largest number of flips tolerated within one window.
+    // Units: count of state changes of bVarToMonitor (FALSE->TRUE and
+    // TRUE->FALSE both count), default 10 flips per 5 s window. The limit is
+    // exceeded when the count at the end of the window is greater than this
+    // value.
     nMaxFlipsAllowed : UDINT := 10;
+
+    // Rising edge clears the latched result, zeroes the flip count and
+    // restarts the window. The block clears the flag again in the same cycle
+    // (reset-dominant assignment), so one pulse produces exactly one reset.
     // If set to TRUE, reset flutter detection.
     {attribute 'pytmc' := 'pv: FLUTTER:RESET'}
     bReset : BOOL;
 END_VAR
 VAR_OUTPUT
+    // Latched verdict: TRUE once bVarToMonitor flipped more than
+    // nMaxFlipsAllowed times inside one fPastTime window; flip counting stops
+    // at that point. Stays TRUE - counting does not resume - until bReset is
+    // pulsed. Cleared on the first cycle. Units: none (discrete).
     bExceededFlipMax : BOOL;
 END_VAR
 VAR
+    // Initialisation request: TRUE on the first cycle and set again by a
+    // reset; consumed by the initialisation branch of the implementation.
     bInit : BOOL := FALSE;
+
+    // bVarToMonitor as sampled in the previous cycle. Comparing it with the
+    // current value is what detects a flip.
     bLastVarValue : BOOL;
+
+    // Flips counted in the current window. Units: count of state changes.
+    // Type is UINT, so it wraps at 65536 - orders of magnitude above any
+    // practical nMaxFlipsAllowed. Zeroed at the end of a window that did not
+    // exceed the limit, and on a reset.
     nNumFlipped : UINT;
+
+    // Times the observation window: PT = fPastTime, Q marks the end of a
+    // window, which is when the count is judged.
     tTimer : TON;
+
+    // Rising-edge detector for bReset, so one pulse produces one reset.
     rtReset : r_trig;
 END_VAR
 ]]></Declaration>
